@@ -38,7 +38,6 @@ from typing import Callable, List, Optional
 from mellea_skills_compiler.compile import CLAUDE_DIR
 from mellea_skills_compiler.toolkit.logging import configure_logger
 
-
 LOGGER = configure_logger()
 
 
@@ -346,7 +345,7 @@ def _log_result(result: RenderResult, *, enforce: bool) -> None:
         LOGGER.warning("[writer:%s] %s", result.name, result.detail)
 
 
-def default_writer_specs() -> List[WriterSpec]:
+def default_writer_specs(repo_root) -> List[WriterSpec]:
     """Wrapper-rendered artifacts. Order matters only for log readability.
 
     Add new specs as each migration step lands. Each spec must satisfy:
@@ -354,7 +353,7 @@ def default_writer_specs() -> List[WriterSpec]:
       - dir-mode writer  (`output_kind="directory"`): module exposes
         `write(emission, out_dir) -> list[Path]`
     """
-    writers_dir = CLAUDE_DIR / "melleafy" / "writers"
+    writers_dir = repo_root / ".claude" / "melleafy" / "writers"
     return [
         WriterSpec(
             name="config.py",

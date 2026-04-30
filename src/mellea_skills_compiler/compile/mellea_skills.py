@@ -332,7 +332,7 @@ def compile(
         claude_argv.extend(["--settings", str(compile_settings_path)])
 
     claude_argv.append(
-        f"'{CLAUDE_DIR}/commands/{"mellea-fy-repair" if repair_mode else "mellea-fy"} {str(spec_path)}'"
+        f"'{"./mellea-fy-repair" if repair_mode else "./mellea-fy"} {str(spec_path)}'"
     )
 
     # Set Mellea-fy process start time
@@ -431,12 +431,12 @@ def compile(
                 # package dir until we find it.
                 repo_root = mellea_dirs[0]
                 for parent in [repo_root, *repo_root.parents]:
-                    if (CLAUDE_DIR / "melleafy" / "writers").is_dir():
+                    if (parent / ".claude" / "melleafy" / "writers").is_dir():
                         repo_root = parent
                         break
                 render_writers(
                     mellea_dirs[0],
-                    default_writer_specs(),
+                    default_writer_specs(repo_root),
                     enforce=True,  # config.py promoted from WARN to ENFORCE in Step 3
                 )
             except Exception as renderer_exc:  # noqa: BLE001
@@ -455,7 +455,7 @@ def compile(
                 f"No *_mellea directory found in {skill_dir} after compilation"
             )
 
-    except TimeoutError, subprocess.SubprocessError:
+    except (TimeoutError, subprocess.SubprocessError):
         processing.stop()
         if process and process.poll() is None:
             process.kill()
