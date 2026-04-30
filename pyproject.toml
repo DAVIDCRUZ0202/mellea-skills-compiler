@@ -32,7 +32,8 @@ dependencies = [
     "rich",
     "typer",
     "isort",
-    "anthropic"
+    "anthropic",
+    "packaging"
 ]
 
 [project.optional-dependencies]
