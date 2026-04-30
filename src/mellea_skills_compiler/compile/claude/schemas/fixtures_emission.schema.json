@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "fixtures_emission",
+  "description": "Output contract for the fixtures/ subpackage. The model emits JSON conforming to this schema; the deterministic writer at .claude/melleafy/writers/fixtures_writer.py renders the per-fixture .py files plus fixtures/__init__.py. The model never writes Python source for fixtures directly — this prevents drift shapes (pytest-style tests, INPUT-only modules, etc.) that would violate the loader contract enforced by file_utils.load_fixtures.",
+  "type": "object",
+  "required": ["fixtures"],
+  "additionalProperties": false,
+  "properties": {
+    "fixtures": {
+      "type": "array",
+      "minItems": 5,
+      "maxItems": 8,
+      "description": "Ordered list of test fixtures. Length must satisfy R16 (5-8 fixtures). Order is preserved in fixtures/__init__.py's ALL_FIXTURES.",
+      "items": { "$ref": "#/$defs/fixture" }
+    },
+    "coverage_doc": {
+      "type": "string",
+      "description": "Optional. Multi-line text rendered as the module docstring at the top of fixtures/__init__.py. Should document which fixtures exercise which C-categories (R16's coverage threshold)."
+    }
+  },
+  "$defs": {
+    "fixture": {
+      "type": "object",
+      "required": ["id", "description", "inputs"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "description": "snake_case identifier; must be unique within fixtures[]; used as the .py filename stem (fixtures/<id>.py), the factory function name (make_<id>), and the --fixture <id> CLI argument."
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "description": "States the expected behaviour, not just the input shape. e.g. 'Critical priority ticket — escalates to L2 immediately' (good); 'Ticket text with priority field' (bad)."
+        },
+        "inputs": {
+          "type": "object",
+          "description": "Keys MUST match the run_pipeline parameter names exactly. Values are JSON scalars, lists, or nested objects; the writer renders them as Python literals via repr() with multi-line strings triple-quoted.",
+          "additionalProperties": true
+        }
+      }
+    }
+  }
+}

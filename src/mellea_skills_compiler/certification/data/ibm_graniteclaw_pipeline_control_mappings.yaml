@@ -1,0 +1,1359 @@
+actions:
+  - id: GV-1.1-001
+    isCategorizedAs:
+      - pc-org-legal
+    type: Action
+  - id: GV-1.2-001
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-generation-audit
+      - pc-policy-traceability
+    type: Action
+  - id: GV-1.2-002
+    isCategorizedAs:
+      - pc-org-policy
+    type: Action
+  - id: GV-1.3-001
+    isCategorizedAs:
+      - pc-org-policy
+    type: Action
+  - id: GV-1.3-002
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-validation-audit
+    type: Action
+  - id: GV-1.3-003
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-content-safety
+    type: Action
+  - id: GV-1.3-004
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-org-oversight
+    type: Action
+  - id: GV-1.3-005
+    isCategorizedAs:
+      - pc-org-policy
+    type: Action
+  - id: GV-1.3-006
+    isCategorizedAs:
+      - pc-org-policy
+    type: Action
+  - id: GV-1.3-007
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-org-decommission
+    type: Action
+  - id: GV-1.4-001
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-content-safety
+    type: Action
+  - id: GV-1.4-002
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-org-legal
+    type: Action
+  - id: GV-1.5-001
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-org-oversight
+      - pc-incident-flagging
+      - pc-generation-audit
+    type: Action
+  - id: GV-1.5-002
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-generation-audit
+    type: Action
+  - id: GV-1.5-003
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-generation-audit
+      - pc-validation-audit
+    type: Action
+  - id: GV-1.6-001
+    isCategorizedAs:
+      - pc-org-policy
+    type: Action
+  - id: GV-1.6-002
+    isCategorizedAs:
+      - pc-org-policy
+    type: Action
+  - id: GV-1.6-003
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-generation-audit
+      - pc-policy-traceability
+    type: Action
+  - id: GV-1.7-001
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-org-decommission
+    type: Action
+  - id: GV-1.7-002
+    isCategorizedAs:
+      - pc-org-decommission
+    type: Action
+  - id: GV-2.1-001
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-incident-flagging
+      - pc-generation-audit
+    type: Action
+  - id: GV-2.1-002
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-org-oversight
+    type: Action
+  - id: GV-2.1-003
+    isCategorizedAs:
+      - pc-org-training
+    type: Action
+  - id: GV-2.1-004
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-org-oversight
+    type: Action
+  - id: GV-2.1-005
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-org-legal
+    type: Action
+  - id: GV-3.2-001
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-org-oversight
+    type: Action
+  - id: GV-3.2-002
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-org-oversight
+    type: Action
+  - id: GV-3.2-003
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-content-safety
+    type: Action
+  - id: GV-3.2-004
+    isCategorizedAs:
+      - pc-org-policy
+    type: Action
+  - id: GV-3.2-005
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-content-safety
+      - pc-input-screening
+    type: Action
+  - id: GV-4.1-001
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-validation-audit
+    type: Action
+  - id: GV-4.1-002
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-validation-audit
+      - pc-generation-audit
+    type: Action
+  - id: GV-4.1-003
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-org-oversight
+      - pc-org-legal
+    type: Action
+  - id: GV-4.2-001
+    isCategorizedAs:
+      - pc-org-legal
+    type: Action
+  - id: GV-4.2-002
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-org-oversight
+    type: Action
+  - id: GV-4.2-003
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-generation-audit
+      - pc-policy-traceability
+    type: Action
+  - id: GV-4.3-001
+    isCategorizedAs:
+      - pc-org-policy
+    type: Action
+  - id: GV-4.3-002
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-generation-audit
+      - pc-component-audit
+      - pc-incident-flagging
+      - pc-policy-traceability
+    type: Action
+  - id: GV-4.3-003
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-org-oversight
+    type: Action
+  - id: GV-5.1-001
+    isCategorizedAs:
+      - pc-org-policy
+    type: Action
+  - id: GV-5.1-002
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-generation-audit
+    type: Action
+  - id: GV-6.1-001
+    isCategorizedAs:
+      - pc-org-legal
+      - pc-org-policy
+    type: Action
+  - id: GV-6.1-002
+    isCategorizedAs:
+      - pc-org-training
+    type: Action
+  - id: GV-6.1-003
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-org-vendor
+    type: Action
+  - id: GV-6.1-004
+    isCategorizedAs:
+      - pc-org-legal
+      - pc-org-vendor
+    type: Action
+  - id: GV-6.1-005
+    isCategorizedAs:
+      - pc-org-vendor
+    type: Action
+  - id: GV-6.1-006
+    isCategorizedAs:
+      - pc-org-legal
+      - pc-org-vendor
+    type: Action
+  - id: GV-6.1-007
+    isCategorizedAs:
+      - pc-org-vendor
+      - pc-org-policy
+    type: Action
+  - id: GV-6.1-008
+    isCategorizedAs:
+      - pc-org-vendor
+      - pc-generation-audit
+    type: Action
+  - id: GV-6.1-009
+    isCategorizedAs:
+      - pc-org-vendor
+      - pc-org-legal
+    type: Action
+  - id: GV-6.1-010
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-org-vendor
+    type: Action
+  - id: GV-6.2-001
+    isCategorizedAs:
+      - pc-org-vendor
+      - pc-org-policy
+    type: Action
+  - id: GV-6.2-002
+    isCategorizedAs:
+      - pc-org-vendor
+      - pc-incident-flagging
+      - pc-generation-audit
+    type: Action
+  - id: GV-6.2-003
+    isCategorizedAs:
+      - pc-org-vendor
+      - pc-org-policy
+    type: Action
+  - id: GV-6.2-004
+    isCategorizedAs:
+      - pc-org-vendor
+      - pc-org-policy
+      - pc-generation-audit
+      - pc-component-audit
+    type: Action
+  - id: GV-6.2-005
+    isCategorizedAs:
+      - pc-org-policy
+    type: Action
+  - id: GV-6.2-006
+    isCategorizedAs:
+      - pc-org-policy
+    type: Action
+  - id: GV-6.2-007
+    isCategorizedAs:
+      - pc-org-legal
+      - pc-org-vendor
+    type: Action
+  - id: MP-1.1-001
+    isCategorizedAs:
+      - pc-org-policy
+    type: Action
+  - id: MP-1.1-002
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-org-oversight
+    type: Action
+  - id: MP-1.1-003
+    isCategorizedAs:
+      - pc-org-policy
+    type: Action
+  - id: MP-1.1-004
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-org-legal
+    type: Action
+  - id: MP-1.2-001
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-org-oversight
+    type: Action
+  - id: MP-1.2-002
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-org-oversight
+    type: Action
+  - id: MP-2.1-001
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-generation-audit
+      - pc-policy-traceability
+    type: Action
+  - id: MP-2.1-002
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-generation-audit
+      - pc-component-audit
+    type: Action
+  - id: MP-2.2-001
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-policy-traceability
+    type: Action
+  - id: MP-2.2-002
+    isCategorizedAs:
+      - pc-org-policy
+    type: Action
+  - id: MP-2.3-001
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-validation-audit
+      - pc-content-safety
+    type: Action
+  - id: MP-2.3-002
+    isCategorizedAs:
+      - pc-org-policy
+    type: Action
+  - id: MP-2.3-003
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-content-safety
+    type: Action
+  - id: MP-2.3-004
+    isCategorizedAs:
+      - pc-org-policy
+    type: Action
+  - id: MP-2.3-005
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-content-safety
+      - pc-input-screening
+    type: Action
+  - id: MP-3.4-001
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-org-oversight
+    type: Action
+  - id: MP-3.4-002
+    isCategorizedAs:
+      - pc-org-training
+    type: Action
+  - id: MP-3.4-003
+    isCategorizedAs:
+      - pc-org-training
+    type: Action
+  - id: MP-3.4-004
+    isCategorizedAs:
+      - pc-org-policy
+    type: Action
+  - id: MP-3.4-005
+    isCategorizedAs:
+      - pc-org-oversight
+      - pc-generation-audit
+      - pc-component-audit
+    type: Action
+  - id: MP-3.4-006
+    isCategorizedAs:
+      - pc-org-oversight
+      - pc-org-policy
+    type: Action
+  - id: MP-4.1-001
+    isCategorizedAs:
+      - pc-content-safety
+      - pc-generation-audit
+      - pc-incident-flagging
+    type: Action
+  - id: MP-4.1-002
+    isCategorizedAs:
+      - pc-org-legal
+    type: Action
+  - id: MP-4.1-003
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-org-legal
+    type: Action
+  - id: MP-4.1-004
+    isCategorizedAs:
+      - pc-org-policy
+    type: Action
+  - id: MP-4.1-005
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-content-safety
+    type: Action
+  - id: MP-4.1-006
+    isCategorizedAs:
+      - pc-org-legal
+      - pc-org-vendor
+    type: Action
+  - id: MP-4.1-007
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-org-vendor
+    type: Action
+  - id: MP-4.1-008
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-content-safety
+      - pc-incident-flagging
+    type: Action
+  - id: MP-4.1-009
+    isCategorizedAs:
+      - pc-content-safety
+      - pc-incident-flagging
+      - pc-generation-audit
+    type: Action
+  - id: MP-4.1-010
+    isCategorizedAs:
+      - pc-org-legal
+      - pc-org-policy
+    type: Action
+  - id: MP-5.1-001
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-content-safety
+    type: Action
+  - id: MP-5.1-002
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-content-safety
+      - pc-incident-flagging
+    type: Action
+  - id: MP-5.1-003
+    isCategorizedAs:
+      - pc-org-policy
+    type: Action
+  - id: MP-5.1-004
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-org-oversight
+    type: Action
+  - id: MP-5.1-005
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-content-safety
+      - pc-input-screening
+    type: Action
+  - id: MP-5.1-006
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-content-safety
+      - pc-incident-flagging
+    type: Action
+  - id: MP-5.2-001
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-org-oversight
+      - pc-generation-audit
+    type: Action
+  - id: MP-5.2-002
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-org-vendor
+    type: Action
+  - id: MS-1.1-001
+    isCategorizedAs:
+      - pc-generation-audit
+      - pc-policy-traceability
+    type: Action
+  - id: MS-1.1-002
+    isCategorizedAs:
+      - pc-content-safety
+      - pc-generation-audit
+      - pc-policy-traceability
+    type: Action
+  - id: MS-1.1-003
+    isCategorizedAs:
+      - pc-org-policy
+    type: Action
+  - id: MS-1.1-004
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-org-oversight
+    type: Action
+  - id: MS-1.1-005
+    isCategorizedAs:
+      - pc-org-policy
+    type: Action
+  - id: MS-1.1-006
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-org-oversight
+      - pc-generation-audit
+      - pc-content-safety
+    type: Action
+  - id: MS-1.1-007
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-content-safety
+      - pc-generation-audit
+    type: Action
+  - id: MS-1.1-008
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-org-oversight
+    type: Action
+  - id: MS-1.1-009
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-generation-audit
+    type: Action
+  - id: MS-1.3-001
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-org-oversight
+    type: Action
+  - id: MS-1.3-002
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-org-oversight
+    type: Action
+  - id: MS-1.3-003
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-org-oversight
+    type: Action
+  - id: MS-2.2-001
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-content-safety
+    type: Action
+  - id: MS-2.2-002
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-generation-audit
+      - pc-policy-traceability
+    type: Action
+  - id: MS-2.2-003
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-org-legal
+    type: Action
+  - id: MS-2.2-004
+    isCategorizedAs:
+      - pc-org-policy
+    type: Action
+  - id: MS-2.3-001
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-validation-audit
+    type: Action
+  - id: MS-2.3-002
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-validation-audit
+    type: Action
+  - id: MS-2.3-003
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-org-oversight
+    type: Action
+  - id: MS-2.3-004
+    isCategorizedAs:
+      - pc-org-policy
+    type: Action
+  - id: MS-2.5-001
+    isCategorizedAs:
+      - pc-org-policy
+    type: Action
+  - id: MS-2.5-002
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-generation-audit
+    type: Action
+  - id: MS-2.5-003
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-content-safety
+      - pc-generation-audit
+    type: Action
+  - id: MS-2.5-004
+    isCategorizedAs:
+      - pc-org-policy
+    type: Action
+  - id: MS-2.5-005
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-generation-audit
+      - pc-policy-traceability
+    type: Action
+  - id: MS-2.5-006
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-content-safety
+      - pc-input-screening
+    type: Action
+  - id: MS-2.6-001
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-org-oversight
+      - pc-content-safety
+    type: Action
+  - id: MS-2.6-002
+    isCategorizedAs:
+      - pc-content-safety
+      - pc-incident-flagging
+      - pc-generation-audit
+    type: Action
+  - id: MS-2.6-003
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-content-safety
+    type: Action
+  - id: MS-2.6-004
+    isCategorizedAs:
+      - pc-content-safety
+      - pc-generation-audit
+      - pc-validation-audit
+    type: Action
+  - id: MS-2.6-005
+    isCategorizedAs:
+      - pc-content-safety
+      - pc-generation-audit
+      - pc-component-audit
+      - pc-incident-flagging
+    type: Action
+  - id: MS-2.6-006
+    isCategorizedAs:
+      - pc-content-safety
+      - pc-input-screening
+      - pc-incident-flagging
+    type: Action
+  - id: MS-2.6-007
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-content-safety
+      - pc-input-screening
+    type: Action
+  - id: MS-2.7-001
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-content-safety
+      - pc-input-screening
+      - pc-generation-audit
+    type: Action
+  - id: MS-2.7-002
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-generation-audit
+      - pc-policy-traceability
+    type: Action
+  - id: MS-2.7-003
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-org-oversight
+    type: Action
+  - id: MS-2.7-004
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-generation-audit
+      - pc-incident-flagging
+    type: Action
+  - id: MS-2.7-005
+    isCategorizedAs:
+      - pc-org-policy
+    type: Action
+  - id: MS-2.7-006
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-incident-flagging
+      - pc-generation-audit
+    type: Action
+  - id: MS-2.7-007
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-content-safety
+      - pc-input-screening
+    type: Action
+  - id: MS-2.7-008
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-content-safety
+      - pc-validation-audit
+    type: Action
+  - id: MS-2.7-009
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-content-safety
+      - pc-input-screening
+    type: Action
+  - id: MS-2.8-001
+    isCategorizedAs:
+      - pc-incident-flagging
+      - pc-generation-audit
+      - pc-policy-traceability
+    type: Action
+  - id: MS-2.8-002
+    isCategorizedAs:
+      - pc-org-policy
+    type: Action
+  - id: MS-2.8-003
+    isCategorizedAs:
+      - pc-generation-audit
+      - pc-policy-traceability
+    type: Action
+  - id: MS-2.8-004
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-org-oversight
+    type: Action
+  - id: MS-2.9-001
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-generation-audit
+    type: Action
+  - id: MS-2.9-002
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-generation-audit
+      - pc-policy-traceability
+    type: Action
+  - id: MS-2.10-001
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-content-safety
+      - pc-input-screening
+    type: Action
+  - id: MS-2.10-002
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-org-oversight
+    type: Action
+  - id: MS-2.10-003
+    isCategorizedAs:
+      - pc-org-policy
+    type: Action
+  - id: MS-2.11-001
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-content-safety
+      - pc-validation-audit
+    type: Action
+  - id: MS-2.11-002
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-content-safety
+    type: Action
+  - id: MS-2.11-003
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-org-oversight
+    type: Action
+  - id: MS-2.11-004
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-content-safety
+    type: Action
+  - id: MS-2.11-005
+    isCategorizedAs:
+      - pc-org-policy
+    type: Action
+  - id: MS-2.12-001
+    isCategorizedAs:
+      - pc-org-policy
+    type: Action
+  - id: MS-2.12-002
+    isCategorizedAs:
+      - pc-org-policy
+    type: Action
+  - id: MS-2.12-003
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-latency-monitoring
+    type: Action
+  - id: MS-2.12-004
+    isCategorizedAs:
+      - pc-org-policy
+    type: Action
+  - id: MS-2.13-001
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-validation-audit
+    type: Action
+  - id: MS-3.2-001
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-org-oversight
+    type: Action
+  - id: MS-3.3-001
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-org-oversight
+    type: Action
+  - id: MS-3.3-002
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-org-oversight
+    type: Action
+  - id: MS-3.3-003
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-content-safety
+    type: Action
+  - id: MS-3.3-004
+    isCategorizedAs:
+      - pc-org-training
+    type: Action
+  - id: MS-3.3-005
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-org-oversight
+      - pc-generation-audit
+    type: Action
+  - id: MS-4.2-001
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-content-safety
+      - pc-input-screening
+      - pc-incident-flagging
+    type: Action
+  - id: MS-4.2-002
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-generation-audit
+      - pc-component-audit
+      - pc-latency-monitoring
+    type: Action
+  - id: MS-4.2-003
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-generation-audit
+    type: Action
+  - id: MS-4.2-004
+    isCategorizedAs:
+      - pc-org-oversight
+      - pc-generation-audit
+      - pc-component-audit
+    type: Action
+  - id: MS-4.2-005
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-org-oversight
+    type: Action
+  - id: MG-1.3-001
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-generation-audit
+      - pc-validation-audit
+    type: Action
+  - id: MG-1.3-002
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-content-safety
+      - pc-generation-audit
+      - pc-incident-flagging
+    type: Action
+  - id: MG-2.2-001
+    isCategorizedAs:
+      - pc-content-safety
+      - pc-generation-audit
+      - pc-validation-audit
+      - pc-policy-traceability
+    type: Action
+  - id: MG-2.2-002
+    isCategorizedAs:
+      - pc-generation-audit
+      - pc-policy-traceability
+    type: Action
+  - id: MG-2.2-003
+    isCategorizedAs:
+      - pc-org-oversight
+      - pc-generation-audit
+      - pc-content-safety
+      - pc-incident-flagging
+    type: Action
+  - id: MG-2.2-004
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-content-safety
+    type: Action
+  - id: MG-2.2-005
+    isCategorizedAs:
+      - pc-content-safety
+      - pc-incident-flagging
+      - pc-generation-audit
+    type: Action
+  - id: MG-2.2-006
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-org-oversight
+    type: Action
+  - id: MG-2.2-007
+    isCategorizedAs:
+      - pc-generation-audit
+      - pc-policy-traceability
+      - pc-component-audit
+    type: Action
+  - id: MG-2.2-008
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-org-oversight
+    type: Action
+  - id: MG-2.2-009
+    isCategorizedAs:
+      - pc-org-policy
+    type: Action
+  - id: MG-2.3-001
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-incident-flagging
+      - pc-generation-audit
+    type: Action
+  - id: MG-2.4-001
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-org-decommission
+    type: Action
+  - id: MG-2.4-002
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-org-oversight
+      - pc-incident-flagging
+    type: Action
+  - id: MG-2.4-003
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-incident-flagging
+      - pc-generation-audit
+    type: Action
+  - id: MG-2.4-004
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-org-decommission
+    type: Action
+  - id: MG-3.1-001
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-org-vendor
+    type: Action
+  - id: MG-3.1-002
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-org-vendor
+      - pc-content-safety
+      - pc-input-screening
+    type: Action
+  - id: MG-3.1-003
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-org-vendor
+      - pc-content-safety
+      - pc-validation-audit
+    type: Action
+  - id: MG-3.1-004
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-content-safety
+    type: Action
+  - id: MG-3.1-005
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-org-vendor
+    type: Action
+  - id: MG-3.2-001
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-generation-audit
+    type: Action
+  - id: MG-3.2-002
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-generation-audit
+      - pc-policy-traceability
+    type: Action
+  - id: MG-3.2-003
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-generation-audit
+      - pc-policy-traceability
+    type: Action
+  - id: MG-3.2-004
+    isCategorizedAs:
+      - pc-org-oversight
+      - pc-content-safety
+      - pc-generation-audit
+    type: Action
+  - id: MG-3.2-005
+    isCategorizedAs:
+      - pc-content-safety
+      - pc-input-screening
+      - pc-incident-flagging
+    type: Action
+  - id: MG-3.2-006
+    isCategorizedAs:
+      - pc-content-safety
+      - pc-generation-audit
+      - pc-incident-flagging
+      - pc-latency-monitoring
+    type: Action
+  - id: MG-3.2-007
+    isCategorizedAs:
+      - pc-org-oversight
+      - pc-org-policy
+    type: Action
+  - id: MG-3.2-008
+    isCategorizedAs:
+      - pc-org-oversight
+      - pc-content-safety
+    type: Action
+  - id: MG-3.2-009
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-org-decommission
+      - pc-validation-audit
+    type: Action
+  - id: MG-4.1-001
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-org-oversight
+    type: Action
+  - id: MG-4.1-002
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-generation-audit
+      - pc-component-audit
+      - pc-incident-flagging
+    type: Action
+  - id: MG-4.1-003
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-org-oversight
+    type: Action
+  - id: MG-4.1-004
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-generation-audit
+      - pc-incident-flagging
+    type: Action
+  - id: MG-4.1-005
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-org-oversight
+    type: Action
+  - id: MG-4.1-006
+    isCategorizedAs:
+      - pc-generation-audit
+      - pc-policy-traceability
+    type: Action
+  - id: MG-4.1-007
+    isCategorizedAs:
+      - pc-org-oversight
+      - pc-generation-audit
+      - pc-incident-flagging
+    type: Action
+  - id: MG-4.2-001
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-generation-audit
+      - pc-component-audit
+      - pc-incident-flagging
+    type: Action
+  - id: MG-4.2-002
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-incident-flagging
+      - pc-generation-audit
+    type: Action
+  - id: MG-4.2-003
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-org-oversight
+    type: Action
+  - id: MG-4.3-001
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-generation-audit
+      - pc-incident-flagging
+    type: Action
+  - id: MG-4.3-002
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-incident-flagging
+      - pc-generation-audit
+      - pc-component-audit
+    type: Action
+  - id: MG-4.3-003
+    isCategorizedAs:
+      - pc-org-legal
+      - pc-incident-flagging
+      - pc-generation-audit
+    type: Action
+  - id: credo-act-control-001
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-generation-audit
+      - pc-component-audit
+    type: Action
+  - id: credo-act-control-002
+    isCategorizedAs:
+      - pc-org-policy
+    type: Action
+  - id: credo-act-control-003
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-content-safety
+      - pc-input-screening
+    type: Action
+  - id: credo-act-control-004
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-content-safety
+      - pc-generation-audit
+      - pc-incident-flagging
+    type: Action
+  - id: credo-act-control-005
+    isCategorizedAs:
+      - pc-content-safety
+      - pc-input-screening
+      - pc-incident-flagging
+    type: Action
+  - id: credo-act-control-006
+    isCategorizedAs:
+      - pc-org-policy
+    type: Action
+  - id: credo-act-control-007
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-component-audit
+      - pc-generation-audit
+    type: Action
+  - id: credo-act-control-008
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-latency-monitoring
+      - pc-component-audit
+    type: Action
+  - id: credo-act-control-009
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-generation-audit
+      - pc-policy-traceability
+    type: Action
+  - id: credo-act-control-010
+    isCategorizedAs:
+      - pc-generation-audit
+      - pc-component-audit
+      - pc-incident-flagging
+      - pc-latency-monitoring
+      - pc-policy-traceability
+    type: Action
+  - id: credo-act-control-011
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-generation-audit
+    type: Action
+  - id: credo-act-control-012
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-validation-audit
+      - pc-latency-monitoring
+    type: Action
+  - id: credo-act-control-013
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-content-safety
+      - pc-generation-audit
+      - pc-latency-monitoring
+    type: Action
+  - id: credo-act-control-014
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-content-safety
+      - pc-validation-audit
+    type: Action
+  - id: credo-act-control-015
+    isCategorizedAs:
+      - pc-content-safety
+      - pc-generation-audit
+      - pc-incident-flagging
+    type: Action
+  - id: credo-act-control-016
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-validation-audit
+      - pc-content-safety
+    type: Action
+  - id: credo-act-control-017
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-content-safety
+    type: Action
+  - id: credo-act-control-018
+    isCategorizedAs:
+      - pc-content-safety
+      - pc-input-screening
+      - pc-incident-flagging
+      - pc-org-oversight
+    type: Action
+  - id: credo-act-control-019
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-incident-flagging
+      - pc-generation-audit
+    type: Action
+  - id: credo-act-control-020
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-content-safety
+      - pc-validation-audit
+    type: Action
+  - id: credo-act-control-021
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-org-oversight
+    type: Action
+  - id: credo-act-control-022
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-content-safety
+      - pc-input-screening
+    type: Action
+  - id: credo-act-control-023
+    isCategorizedAs:
+      - pc-content-safety
+      - pc-input-screening
+      - pc-incident-flagging
+      - pc-generation-audit
+    type: Action
+  - id: credo-act-control-024
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-input-screening
+      - pc-generation-audit
+    type: Action
+  - id: credo-act-control-025
+    isCategorizedAs:
+      - pc-org-policy
+    type: Action
+  - id: credo-act-control-026
+    isCategorizedAs:
+      - pc-content-safety
+      - pc-incident-flagging
+      - pc-generation-audit
+    type: Action
+  - id: credo-act-control-027
+    isCategorizedAs:
+      - pc-content-safety
+      - pc-incident-flagging
+      - pc-generation-audit
+    type: Action
+  - id: credo-act-control-028
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-org-oversight
+      - pc-incident-flagging
+    type: Action
+  - id: credo-act-control-029
+    isCategorizedAs:
+      - pc-org-training
+    type: Action
+  - id: credo-act-control-030
+    isCategorizedAs:
+      - pc-org-oversight
+      - pc-content-safety
+      - pc-generation-audit
+    type: Action
+  - id: credo-act-control-031
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-org-oversight
+      - pc-generation-audit
+    type: Action
+  - id: credo-act-control-032
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-latency-monitoring
+    type: Action
+  - id: credo-act-control-033
+    isCategorizedAs:
+      - pc-org-vendor
+      - pc-org-policy
+    type: Action
+  - id: credo-act-control-034
+    isCategorizedAs:
+      - pc-org-legal
+      - pc-org-policy
+    type: Action
+  - id: credo-act-control-035
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-org-oversight
+    type: Action
+  - id: credo-act-control-036
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-org-oversight
+    type: Action
+  - id: credo-act-control-037
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-org-oversight
+      - pc-content-safety
+      - pc-validation-audit
+    type: Action
+  - id: credo-act-control-038
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-incident-flagging
+      - pc-generation-audit
+      - pc-content-safety
+    type: Action
+  - id: credo-act-control-039
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-org-legal
+      - pc-generation-audit
+      - pc-policy-traceability
+    type: Action
+  - id: credo-act-control-040
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-org-oversight
+      - pc-generation-audit
+    type: Action
+  - id: credo-act-control-041
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-org-vendor
+      - pc-incident-flagging
+    type: Action
+  - id: credo-act-control-042
+    isCategorizedAs:
+      - pc-org-policy
+      - pc-incident-flagging
+      - pc-generation-audit
+      - pc-component-audit
+    type: Action

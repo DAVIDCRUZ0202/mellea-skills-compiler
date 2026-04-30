@@ -1,0 +1,150 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "classification",
+  "description": "Output contract for intermediate/classification.json (Step 0). Consumed by Steps 1a, 1b, 2, 2.5, 3, 6, 7. See mellea-fy-classify.md for the authoritative axis definitions, signal-weighting rules, and cross-axis halts.",
+  "type": "object",
+  "required": [
+    "format_version",
+    "archetype",
+    "shape",
+    "tool_involvement",
+    "tool_involvement_variant",
+    "source_runtime",
+    "modality"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "format_version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+$",
+      "description": "Format version of this classification document (e.g. '1.0'). Bumped when the on-disk shape changes."
+    },
+    "archetype": {
+      "$ref": "#/$defs/archetype",
+      "description": "Axis 1 — Reasoning archetype. Drives decomposition strategy in Step 1b."
+    },
+    "archetype_confidence": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 1.0,
+      "description": "Optional. Confidence score for archetype detection (0.0-1.0)."
+    },
+    "shape": {
+      "$ref": "#/$defs/shape",
+      "description": "Axis 2 — Pipeline shape. Drives entry-point construction in Step 3."
+    },
+    "shape_phase_count": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Optional. Number of distinct phases detected. For 'Sequential' shapes should be >= 2 (otherwise cross-axis warning fires)."
+    },
+    "tool_involvement": {
+      "type": "string",
+      "enum": [
+        "No tools",
+        "Tools provide input",
+        "Pipeline calls tools (deterministic)",
+        "Pipeline calls tools (LLM-directed)"
+      ],
+      "description": "Axis 3 — Human-readable tool-involvement label paired with tool_involvement_variant."
+    },
+    "tool_involvement_variant": {
+      "type": "string",
+      "enum": ["P0", "P2", "P3", "P4"],
+      "description": "Axis 3 — Variant code. P0 = no tools; P2 = pipeline calls tools deterministically; P3 = LLM-directed tool calls; P4 = tools provide input."
+    },
+    "source_runtime": {
+      "$ref": "#/$defs/source_runtime",
+      "description": "Axis 4 — Detected source runtime (or 'hybrid'/'unknown' per R1)."
+    },
+    "source_runtime_override": {
+      "oneOf": [
+        { "type": "null" },
+        { "$ref": "#/$defs/source_runtime" }
+      ],
+      "description": "Set when --source-runtime=<runtime> was supplied on the command line; overrides signal-based detection. Null when no override provided."
+    },
+    "source_runtime_scores": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "number",
+        "minimum": 0.0
+      },
+      "description": "Map of runtime → weighted signal score, populated by Axis 4 detection. Used to justify hybrid_threshold_triggered."
+    },
+    "hybrid_threshold_triggered": {
+      "type": "boolean",
+      "description": "True when the top two source_runtime_scores differ by <= 1.0 (R1 hybrid threshold). Implies source_runtime == 'hybrid' unless overridden."
+    },
+    "modality": {
+      "$ref": "#/$defs/modality",
+      "description": "Axis 5 — Primary interaction modality. Validated against Axis 1 in cross-axis checks."
+    },
+    "modality_confidence": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 1.0,
+      "description": "Optional. Confidence score for modality detection (0.0-1.0)."
+    },
+    "secondary_modalities": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/modality" },
+      "description": "Additional modalities detected when more than one applies (e.g. scheduled + event_triggered). Should not contain the value of 'modality'."
+    },
+    "warnings": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Cross-axis warnings emitted by Step 0 (e.g. 'Axis 5 inferred — no explicit modality signals found')."
+    },
+    "halt": {
+      "oneOf": [
+        { "type": "null" },
+        { "type": "string", "minLength": 1 }
+      ],
+      "description": "When non-null, Step 0 halted with the given reason (e.g. P0 + D1 incoherent, heartbeat + synchronous_oneshot). Downstream steps MUST refuse to run when halt is set. See mellea-fy-classify.md cross-axis validation table."
+    }
+  },
+  "$defs": {
+    "archetype": {
+      "type": "string",
+      "enum": ["A", "B", "C", "D1", "D2", "E"],
+      "description": "Reasoning archetype: A=Analysis, B=Generation, C=Diagnosis, D1=Integration, D2=Orchestration, E=Knowledge."
+    },
+    "shape": {
+      "type": "string",
+      "enum": ["Sequential", "One-shot"],
+      "description": "Pipeline shape: Sequential = multi-phase m.instruct calls; One-shot = single m.instruct call."
+    },
+    "source_runtime": {
+      "type": "string",
+      "enum": [
+        "agent_skills_std",
+        "claude_code",
+        "openclaw",
+        "letta",
+        "crewai",
+        "langgraph",
+        "autogen",
+        "openai_agents_sdk",
+        "smolagents",
+        "hybrid",
+        "unknown"
+      ],
+      "description": "One of the nine supported runtimes, or 'hybrid' (R1 threshold) or 'unknown' (no signals detected)."
+    },
+    "modality": {
+      "type": "string",
+      "enum": [
+        "synchronous_oneshot",
+        "streaming",
+        "conversational_session",
+        "review_gated",
+        "scheduled",
+        "event_triggered",
+        "heartbeat",
+        "realtime_media"
+      ],
+      "description": "One of eight supported modalities. See mellea-fy-classify.md Axis 5 for declaration signals."
+    }
+  }
+}

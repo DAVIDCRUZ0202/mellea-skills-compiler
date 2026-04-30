@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "deny": [
+      "Write(skills/clawdefender/clawdefender_mellea/config.py)",
+      "Edit(skills/clawdefender/clawdefender_mellea/config.py)",
+      "Write(skills/clawdefender/clawdefender_mellea/fixtures/**)",
+      "Edit(skills/clawdefender/clawdefender_mellea/fixtures/**)"
+    ]
+  }
+}

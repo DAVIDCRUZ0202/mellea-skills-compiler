@@ -1,0 +1,126 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "dependency_plan",
+  "description": "Output contract for intermediate/dependency_plan.json (Step 2.5c). Consumed by Steps 2.5d, 3, 5, 6, 7. See mellea-fy-deps.md for the authoritative category default-disposition table, the eight valid dispositions, the four generation modes, and the Step 2.5d amendment protocol that updates element_mapping.json.",
+  "type": "object",
+  "required": [
+    "format_version",
+    "source_runtime",
+    "generation_mode",
+    "user_acknowledged_stubs",
+    "plan"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "format_version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+$",
+      "description": "Format version of this dependency plan document (e.g. '1.0')."
+    },
+    "source_runtime": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Source runtime carried over from classification.json (e.g. 'openclaw', 'crewai'). Used by Step 6 to format SETUP.md sections appropriately."
+    },
+    "generation_mode": {
+      "type": "string",
+      "enum": ["auto", "ask", "config", "strict"],
+      "description": "The generation mode in effect: auto = apply category defaults; ask = elicit overrides via terminal UI; config = read overrides from a JSON file; strict = halt if any stub/delegate disposition would be applied."
+    },
+    "user_acknowledged_stubs": {
+      "type": "boolean",
+      "description": "True when the user interacted with the elicitation UI (ask mode) or supplied a config file containing at least one stub disposition. Used by Step 6 to suppress the auto-mode recap warning."
+    },
+    "plan": {
+      "type": "array",
+      "description": "One entry per dependency. May be empty when the source has no C1-C9 categorised elements.",
+      "items": { "$ref": "#/$defs/plan_entry" }
+    }
+  },
+  "$defs": {
+    "plan_entry": {
+      "type": "object",
+      "required": [
+        "entry_id",
+        "category",
+        "disposition",
+        "source_of_decision",
+        "source_elements",
+        "target"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "entry_id": {
+          "type": "string",
+          "pattern": "^dep_[0-9]{3,}$",
+          "description": "Zero-padded sequential identifier (dep_001, dep_050, ...)."
+        },
+        "category": {
+          "type": "string",
+          "enum": [
+            "c1_identity",
+            "c2_operating_rules",
+            "c3_user_facts",
+            "c4_short_term_state",
+            "c5_long_term_memory",
+            "c6_tools",
+            "c7_credentials",
+            "c8_runtime_environment",
+            "c9_scheduling",
+            "cross_reference"
+          ],
+          "description": "Snake-case category code (or 'cross_reference' for pure cross-reference artifacts that resolve to disposition == 'remove')."
+        },
+        "disposition": {
+          "type": "string",
+          "enum": [
+            "bundle",
+            "real_impl",
+            "stub",
+            "mock",
+            "delegate_to_runtime",
+            "external_input",
+            "load_from_disk",
+            "remove"
+          ],
+          "description": "How this dependency is realised in the generated code. See mellea-fy-deps.md §Disposition effects on generated code for the file-by-file consequence of each value."
+        },
+        "source_of_decision": {
+          "type": "string",
+          "enum": ["auto", "user", "config", "dialect"],
+          "description": "Why this disposition was chosen: auto = category default; user = ask-mode override; config = config-file override; dialect = dialect doc override."
+        },
+        "source_elements": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "pattern": "^elem_[0-9]{3,}$"
+          },
+          "description": "Inventory element IDs that produced this dependency entry. >1 entry implies aggregation per Step 1b's cross-element pass and Step 2.5a's audit-time merge."
+        },
+        "target": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[a-z_][a-z0-9_/]*\\.py:[A-Za-z_][A-Za-z0-9_]*$",
+          "description": "Target symbol in the generated package, formatted as '<file>:<symbol>' (e.g. 'tools.py:doi_lookup', 'constrained_slots.py:slack_post', 'config.py:PREFIX_TEXT'). Slashes are permitted in <file> for nested files like 'fixtures/mock_tools.py'."
+        },
+        "subtype": {
+          "type": "string",
+          "enum": ["http", "graphql", "mcp", "sdk", "abstract"],
+          "description": "Optional. Required for category == 'c6_tools' to distinguish C6 sub-defaults (http/graphql/mcp/sdk imply real_impl by default; abstract implies stub). Cross-reference invariant (not enforced by JSON Schema): subtype must be present iff category == 'c6_tools'."
+        },
+        "prerequisites": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "description": "Optional. Free-form prerequisite descriptions (e.g. 'HTTP access to api.crossref.org', 'Slack OAuth scopes channels:write'). Surfaced in SETUP.md."
+        },
+        "override_rationale": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Optional. Human-supplied rationale for an override (required when source_of_decision is 'user' or 'config' and disposition differs from the category default). Cross-reference invariant (not enforced by JSON Schema): MUST be present when source_of_decision in {'user', 'config'} and an override is applied."
+        }
+      }
+    }
+  }
+}

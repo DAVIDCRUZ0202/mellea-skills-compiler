@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "runtime_defaults",
+  "description": "Default LLM backend and model that compiled skills use at runtime. Edited by users; read by the compile pipeline. The values are baked into each compiled skill's config.py as the BACKEND and MODEL_ID constants.",
+  "type": "object",
+  "required": ["backend", "model_id"],
+  "additionalProperties": false,
+  "properties": {
+    "format_version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+$",
+      "description": "Schema version. Currently '1.0'."
+    },
+    "backend": {
+      "type": "string",
+      "enum": ["ollama"],
+      "description": "Which inference backend to use. Currently only 'ollama' works — picking anything else causes 'Backend name X unknown' at runtime. Add new values to this enum as mellea adds support for them."
+    },
+    "model_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Model name passed to the backend (e.g. 'granite3.3:8b' for ollama). The model must be available in the user's runtime environment — the schema does not validate availability."
+    },
+    "_comment": {
+      "type": "string",
+      "description": "Optional human-readable note. Ignored by the compile pipeline."
+    }
+  }
+}

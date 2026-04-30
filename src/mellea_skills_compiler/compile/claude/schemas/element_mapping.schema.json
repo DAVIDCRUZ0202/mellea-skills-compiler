@@ -1,0 +1,139 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "element_mapping",
+  "description": "Output contract for intermediate/element_mapping.json (Step 2). Consumed by Steps 2.5, 3, 5, 6, 7. See mellea-fy-map.md for the authoritative tag-to-primitive table, alternative rules (EXTRACT two-step, VALIDATE_OUTPUT executable-vs-LLM, CONVERSE three realisations, REMEDIATE three-entry expansion), and the TOOL_TEMPLATE provisional-routing rule that requires final_target_file == 'pending_step_2.5' until Step 2.5d amends.",
+  "type": "object",
+  "required": ["format_version", "mappings"],
+  "additionalProperties": false,
+  "properties": {
+    "format_version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+$",
+      "description": "Format version of this mapping document (e.g. '1.0')."
+    },
+    "mappings": {
+      "type": "array",
+      "minItems": 1,
+      "description": "Routing decisions in order. Count of mapping entries equals count of inventory entries plus expansions for two-step EXTRACT (-step1, -step2 suffixes) and three-entry REMEDIATE (modification + evaluation + loop wrapper).",
+      "items": { "$ref": "#/$defs/mapping" }
+    }
+  },
+  "$defs": {
+    "mapping": {
+      "type": "object",
+      "required": [
+        "mapping_id",
+        "element_id",
+        "target_file",
+        "target_symbol",
+        "primitive",
+        "final_target_file"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "mapping_id": {
+          "type": "string",
+          "pattern": "^map_[0-9]{3,}$",
+          "description": "Zero-padded sequential identifier (map_001, map_002, ...)."
+        },
+        "element_id": {
+          "type": "string",
+          "pattern": "^elem_[0-9]{3,}(-step[12]|-mod|-eval|-loop)?$",
+          "description": "Source element identifier from inventory.json. Suffixes: '-step1'/'-step2' for two-step EXTRACT expansions; '-mod'/'-eval'/'-loop' (or other suffixes per Step 2 convention) for REMEDIATE three-entry expansion. Cross-reference: every element_id (modulo suffix) MUST exist in inventory.json — not enforced by JSON Schema.",
+          "examples": ["elem_042", "elem_017-step1", "elem_017-step2"]
+        },
+        "target_file": {
+          "$ref": "#/$defs/target_file",
+          "description": "Initial routing target. For TOOL_TEMPLATE elements this is always 'tools.py' provisionally; Step 2.5d may move it to 'constrained_slots.py' or 'fixtures/mock_tools.py' (recorded in final_target_file)."
+        },
+        "target_symbol": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Symbol name within target_file (function, class, slot, or module-level constant). NO_DECOMPOSE entries omit this only when paired with primitive == 'none'; otherwise required."
+        },
+        "primitive": {
+          "$ref": "#/$defs/primitive",
+          "description": "The Mellea primitive or Python construct mapped to. 'none' indicates a NO_DECOMPOSE element retained for invariant completeness."
+        },
+        "primitive_details": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "Optional. Primitive-specific metadata (e.g. {format_schema, grounding_context_keys} for m.instruct). Open-shape map; consumers downstream destructure based on primitive."
+        },
+        "final_target_file": {
+          "oneOf": [
+            { "$ref": "#/$defs/target_file" },
+            { "const": "pending_step_2.5" },
+            { "const": "fixtures/mock_tools.py" }
+          ],
+          "description": "Final routing target after Step 2.5d amendment. MUST be 'pending_step_2.5' for every TOOL_TEMPLATE entry until Step 2.5 runs. 'fixtures/mock_tools.py' is reachable only when disposition == 'mock'. Cross-reference invariant (not enforced by JSON Schema): no entry may retain 'pending_step_2.5' once Step 2.5 declares done."
+        },
+        "step_2_confidence": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 1.0,
+          "description": "Optional. Confidence score for the Step 2 routing decision."
+        },
+        "step_2_rationale": {
+          "type": "string",
+          "description": "Optional. One-line rationale for the routing decision (table row applied, override invoked, judgement call summary)."
+        },
+        "llm_judgement_required": {
+          "type": "boolean",
+          "description": "Optional. True if Step 2 invoked an LLM judgement to make this routing decision. Such entries appear in the mapping report's Judgment Calls section (Step 6 §4)."
+        },
+        "dialect_override_applied": {
+          "oneOf": [
+            { "type": "null" },
+            { "type": "string", "minLength": 1 }
+          ],
+          "description": "Optional. When non-null, identifies the dialect doc row that overrode the general tag-to-primitive table (e.g. 'crewai:agent-instructions-as-prefix'). MUST reference a real row in the detected runtime's dialect doc — not enforced by JSON Schema."
+        },
+        "validation_kind": {
+          "oneOf": [
+            { "type": "null" },
+            { "type": "string", "enum": ["executable", "llm_judged"] }
+          ],
+          "description": "Required for VALIDATE_OUTPUT mappings: 'executable' (Requirement with validation_fn) or 'llm_judged' (bare Requirement(description=...)). Null otherwise."
+        }
+      }
+    },
+    "target_file": {
+      "type": "string",
+      "enum": [
+        "pipeline.py",
+        "tools.py",
+        "schemas.py",
+        "config.py",
+        "slots.py",
+        "requirements.py",
+        "constrained_slots.py",
+        "mobjects.py",
+        "loader.py",
+        "main.py"
+      ],
+      "description": "One of the ten always-emitted or conditional package files. fixtures/mock_tools.py is permitted only via final_target_file when disposition == 'mock'."
+    },
+    "primitive": {
+      "type": "string",
+      "enum": [
+        "@generative",
+        "m.instruct",
+        "m.transform",
+        "m.query",
+        "m.chat",
+        "m.react",
+        "Requirement",
+        "BaseModel",
+        "Final",
+        "function",
+        "while_loop",
+        "parameter",
+        "loader_call",
+        "stub",
+        "none"
+      ],
+      "description": "The Mellea primitive or Python construct emitted at target_symbol. Values track mellea-fy-map.md tag-to-primitive table. 'none' is reserved for NO_DECOMPOSE entries."
+    }
+  }
+}

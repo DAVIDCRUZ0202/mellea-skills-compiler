@@ -1,0 +1,185 @@
+taxonomies:
+  - id: ibm-graniteclaw-control-mappings
+    name: IBM GraniteClaw Draft Pipeline Mapping
+    type: RiskControlGroupTaxonomy
+    description: >-
+      IBM GraniteClaw Draft Pipeline Mapping creates static mapping between existing governance action IDs and
+      granite claw pipeline controls
+    url: https://github.com/ibm/granite-claw
+    dateCreated: 2026-03-25
+    version: "1"
+groups:
+  - id: ibm-graniteclaw-cm-group-implemented
+    name: Implemented
+    description: >-
+     Implemented (count toward AUTOMATED/PARTIAL).
+    narrower:
+      - pc-content-safety
+      - pc-input-screening
+      - pc-generation-audit
+      - pc-component-audit
+      - pc-validation-audit
+      - pc-latency-monitoring
+      - pc-incident-flagging
+      - pc-policy-traceability
+    type: RiskControlGroup
+    isDefinedByTaxonomy: ibm-graniteclaw-control-mappings
+  - id: ibm-graniteclaw-cm-group-organisational
+    name: Organisational
+    description: >-
+      Organisational (always -> MANUAL).
+    narrower:
+      - pc-org-policy
+      - pc-org-training
+      - pc-org-legal
+      - pc-org-oversight
+      - pc-org-vendor
+      - pc-org-decommission
+    type: RiskControlGroup
+    isDefinedByTaxonomy: ibm-graniteclaw-control-mappings
+  - id: ibm-graniteclaw-cm-group-gap
+    name: Gap
+    description: >-
+     Gap (not yet implemented -> MANUAL).
+    narrower:
+      - pc-tool-access-governance
+      - pc-sampling-audit
+      - pc-enforcement
+    type: RiskControlGroup
+    isDefinedByTaxonomy: ibm-graniteclaw-control-mappings
+  - id: pc-content-safety
+    name: pc-content-safety
+    description: >-
+      Guardian risk checks on every LLM output
+    type: RiskControlGroup
+    broader:
+      - ibm-graniteclaw-cm-group-implemented
+    isDefinedByTaxonomy: ibm-graniteclaw-control-mappings
+  - id: pc-input-screening
+    name: pc-input-screening
+    description: >-
+      Guardian risk checks on input prompts
+    type: RiskControlGroup
+    broader:
+      - ibm-graniteclaw-cm-group-implemented
+    isDefinedByTaxonomy: ibm-graniteclaw-control-mappings
+  - id: pc-generation-audit
+    name: pc-generation-audit
+    description: >-
+      JSONL logging of every LLM input/output
+    type: RiskControlGroup
+    broader:
+      - ibm-graniteclaw-cm-group-implemented
+    isDefinedByTaxonomy: ibm-graniteclaw-control-mappings
+  - id: pc-component-audit
+    name: pc-component-audit
+    description: >-
+      JSONL logging of component lifecycle events
+    type: RiskControlGroup
+    broader:
+      - ibm-graniteclaw-cm-group-implemented
+    isDefinedByTaxonomy: ibm-graniteclaw-control-mappings
+  - id: pc-validation-audit
+    name: pc-validation-audit
+    description: >-
+      JSONL logging of requirement validation results
+    type: RiskControlGroup
+    broader:
+      - ibm-graniteclaw-cm-group-implemented
+    isDefinedByTaxonomy: ibm-graniteclaw-control-mappings
+  - id: pc-latency-monitoring
+    name: pc-latency-monitoring
+    description: >-
+      Tracks LLM call latency per generation event
+    type: RiskControlGroup
+    broader:
+      - ibm-graniteclaw-cm-group-implemented
+    isDefinedByTaxonomy: ibm-graniteclaw-control-mappings
+  - id: pc-incident-flagging
+    name: pc-incident-flagging
+    description: >-
+      Flags/logs when Guardian detects a risk
+    type: RiskControlGroup
+    broader:
+      - ibm-graniteclaw-cm-group-implemented
+    isDefinedByTaxonomy: ibm-graniteclaw-control-mappings
+  - id: pc-policy-traceability
+    name: pc-policy-traceability
+    description: >-
+      Tags audit entries with policy_id back to Nexus
+    type: RiskControlGroup
+    broader:
+      - ibm-graniteclaw-cm-group-implemented
+    isDefinedByTaxonomy: ibm-graniteclaw-control-mappings
+  - id: pc-org-policy
+    name: pc-org-policy
+    description: >-
+      Governance policies, review boards, accountability
+    type: RiskControlGroup
+    broader:
+      - ibm-graniteclaw-cm-group-organisational
+    isDefinedByTaxonomy: ibm-graniteclaw-control-mappings
+  - id: pc-org-training
+    name: pc-org-training
+    description: >-
+      AI literacy, ethics training, competency programmes
+    type: RiskControlGroup
+    broader:
+      - ibm-graniteclaw-cm-group-organisational
+    isDefinedByTaxonomy: ibm-graniteclaw-control-mappings
+  - id: pc-org-legal
+    name: pc-org-legal
+    description: >-
+      Contracts, SLAs, regulatory filings
+    type: RiskControlGroup
+    broader:
+      - ibm-graniteclaw-cm-group-organisational
+    isDefinedByTaxonomy: ibm-graniteclaw-control-mappings
+  - id: pc-org-oversight
+    name: pc-org-oversight
+    description: >-
+      Human-in-the-loop review, escalation procedures
+    type: RiskControlGroup
+    broader:
+      - ibm-graniteclaw-cm-group-organisational
+    isDefinedByTaxonomy: ibm-graniteclaw-control-mappings
+  - id: pc-org-vendor
+    name: pc-org-vendor
+    description: >-
+      Due diligence, procurement, supply chain governance
+    type: RiskControlGroup
+    broader:
+      - ibm-graniteclaw-cm-group-organisational
+    isDefinedByTaxonomy: ibm-graniteclaw-control-mappings
+  - id: pc-org-decommission
+    name: pc-org-decommission
+    description: >-
+      System shutdown, data retention, after-action review
+    type: RiskControlGroup
+    broader:
+      - ibm-graniteclaw-cm-group-organisational
+    isDefinedByTaxonomy: ibm-graniteclaw-control-mappings
+  - id: pc-tool-access-governance
+    name: pc-tool-access-governance
+    description: >-
+      Audit/gate MCP tool calls
+    type: RiskControlGroup
+    broader:
+      - ibm-graniteclaw-cm-group-gap
+    isDefinedByTaxonomy: ibm-graniteclaw-control-mappings
+  - id: pc-sampling-audit
+    name: pc-sampling-audit
+    description: >-
+      Track repair/rejection iterations
+    type: RiskControlGroup
+    broader:
+      - ibm-graniteclaw-cm-group-gap
+    isDefinedByTaxonomy: ibm-graniteclaw-control-mappings
+  - id: pc-enforcement
+    name: pc-enforcement
+    description: >-
+      Block unsafe outputs in SEQUENTIAL mode
+    type: RiskControlGroup
+    broader:
+      - ibm-graniteclaw-cm-group-gap
+    isDefinedByTaxonomy: ibm-graniteclaw-control-mappings

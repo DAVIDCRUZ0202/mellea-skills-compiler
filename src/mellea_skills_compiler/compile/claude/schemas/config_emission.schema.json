@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "config_emission",
+  "description": "Output contract for config.py generation. The model emits JSON conforming to this schema; the deterministic writer at .claude/melleafy/writers/config_writer.py renders the Python source.",
+  "type": "object",
+  "required": ["constants"],
+  "additionalProperties": false,
+  "properties": {
+    "constants": {
+      "type": "array",
+      "minItems": 1,
+      "description": "Ordered list of module-level Final constants to emit in config.py.",
+      "items": { "$ref": "#/$defs/constant" }
+    }
+  },
+  "$defs": {
+    "constant": {
+      "type": "object",
+      "required": ["name", "value", "type"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]*$",
+          "description": "SCREAMING_SNAKE_CASE identifier. Must be a valid Python identifier."
+        },
+        "value": {
+          "description": "The constant's value as a JSON scalar. Strings may contain any characters including quotes, backslashes, and braces — the writer uses repr() or triple-quoting to produce safe Python source.",
+          "oneOf": [
+            { "type": "string" },
+            { "type": "integer" },
+            { "type": "number" },
+            { "type": "boolean" }
+          ]
+        },
+        "type": {
+          "type": "string",
+          "enum": ["str", "int", "float", "bool"],
+          "description": "Python type annotation. Must match the JSON type of value: string→str, integer→int, number→float, boolean→bool."
+        },
+        "category": {
+          "type": "string",
+          "pattern": "^C[1-9]$",
+          "description": "Optional C-category code from the dependency plan (e.g. 'C1', 'C8'). Used by the writer to group constants under labelled section headers. Omit for runtime constants (LOOP_BUDGET etc.) that are not derived from a classified source element."
+        },
+        "provenance": {
+          "type": "object",
+          "required": ["source_file", "source_lines"],
+          "additionalProperties": false,
+          "description": "Optional. Source location of the element this constant was derived from. Written as '# PROVENANCE: <source_file>:<source_lines>' immediately after the constant declaration.",
+          "properties": {
+            "source_file": {
+              "type": "string",
+              "description": "Relative path to the source file (e.g. 'SOUL.md', 'agents.yaml')."
+            },
+            "source_lines": {
+              "type": "string",
+              "description": "Line range from inventory element (e.g. '1-45', '12')."
+            }
+          }
+        }
+      }
+    }
+  }
+}

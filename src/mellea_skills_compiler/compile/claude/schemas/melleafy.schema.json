@@ -1,0 +1,163 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "melleafy",
+  "description": "Output contract for melleafy.json — the generated package manifest written by Step 3 (skeleton) and finalised by Step 6. Consumed by the export command (exporter.py:stage1_validate, stage2_load) and by downstream tooling that introspects the package. See mellea-fy-artifacts.md §`melleafy.json` finalisation (R20) for field semantics and mellea-fy-generate.md (around line 420) for the Step 3 skeleton.",
+  "type": "object",
+  "required": ["manifest_version", "entry_signature", "package_name"],
+  "additionalProperties": false,
+  "properties": {
+    "manifest_version": {
+      "type": "string",
+      "pattern": "^(1\\.([1-9][0-9]*)\\.[0-9]+|[2-9]\\.[0-9]+\\.[0-9]+|[1-9][0-9]+\\.[0-9]+\\.[0-9]+)$",
+      "description": "Semver string >= 1.1.0. The pattern accepts 1.X.Y for X >= 1 and any major >= 2 (multi-digit majors included); 1.0.* and 0.*.* are rejected. Hard-required by exporter.py:stage1_validate."
+    },
+    "entry_signature": {
+      "type": "string",
+      "minLength": 1,
+      "description": "AST-extracted signature of the generated pipeline.py:run_pipeline function (e.g. 'run_pipeline(ticket_text: str, priority: str = \\'normal\\') -> TriageReport'). Hard-required by the export command — populated in Step 6 from the generated source, not LLM-authored."
+    },
+    "package_name": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*_mellea$",
+      "description": "Snake_case package directory name with the mandatory `_mellea` suffix (e.g. 'triage_mellea'). Hard-required by exporter.py:stage2_load."
+    },
+    "format_version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+$",
+      "description": "Soft-required (warn if absent). Format version of this manifest document (e.g. '1.0')."
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Soft-required (warn if absent). ISO-8601 UTC timestamp of the Step 3 skeleton write (re-set on Step 6 finalisation if the manifest is rewritten end-to-end)."
+    },
+    "melleafy_version": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Soft-required (warn if absent). Version of the melleafy compiler that produced this manifest (e.g. '4.0.0')."
+    },
+    "source_runtime": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Soft-required (warn if absent). Carried from classification.json:source_runtime (e.g. 'openclaw', 'crewai', 'agent_skills_std')."
+    },
+    "modality": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Soft-required (warn if absent). Carried from classification.json:modality (e.g. 'synchronous_oneshot', 'review_gated')."
+    },
+    "archetype": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Soft-required (warn if absent). Carried from classification.json:archetype (one of A, B, C, D1, D2, E)."
+    },
+    "categories_resolved": {
+      "type": "object",
+      "description": "Soft-required (warn if absent). Keyed-object summary of dependency_plan.json grouped by category code. Rule 6-1 — MUST be a JSON object keyed by 'c1_identity'..'c9_scheduling'; MUST NOT be a JSON array. Each category key carries a {count, entries[]} record (and optionally disposition for single-disposition categories). Rule 6-2 — every entry under c1_identity must include a `description` field derived from the source element's content_summary (or content_full first sentence ≤ 200 chars).",
+      "additionalProperties": false,
+      "properties": {
+        "c1_identity": { "$ref": "#/$defs/category_record" },
+        "c2_operating_rules": { "$ref": "#/$defs/category_record" },
+        "c3_user_facts": { "$ref": "#/$defs/category_record" },
+        "c4_short_term_state": { "$ref": "#/$defs/category_record" },
+        "c5_long_term_memory": { "$ref": "#/$defs/category_record" },
+        "c6_tools": { "$ref": "#/$defs/category_record" },
+        "c7_credentials": { "$ref": "#/$defs/category_record" },
+        "c8_runtime_environment": { "$ref": "#/$defs/category_record" },
+        "c9_scheduling": { "$ref": "#/$defs/category_record" }
+      }
+    },
+    "declared_env_vars": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]*$" },
+      "description": "Soft-required (warn if absent). Environment variables declared by C7 (credentials) and external_input C8 entries (e.g. ['SLACK_API_TOKEN', 'JIRA_API_KEY'])."
+    },
+    "pipeline_parameters": {
+      "type": "array",
+      "description": "Soft-required (warn if absent). Parameters of pipeline.py:run_pipeline, in declaration order. Derived by AST inspection during Step 6 — must agree with entry_signature.",
+      "items": { "$ref": "#/$defs/pipeline_parameter" }
+    }
+  },
+  "$defs": {
+    "category_record": {
+      "type": "object",
+      "required": ["count", "entries"],
+      "additionalProperties": false,
+      "properties": {
+        "count": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of plan entries in this category. Zero-count categories are still emitted with entries: [] (Rule 6-1)."
+        },
+        "disposition": {
+          "type": "string",
+          "description": "Optional. The single disposition shared by all entries in this category (e.g. 'bundle' for c1_identity when every entry is bundled). Omit when entries have heterogeneous dispositions."
+        },
+        "entries": {
+          "type": "array",
+          "description": "List of resolved dependency entries for this category. May be empty.",
+          "items": { "$ref": "#/$defs/category_entry" }
+        }
+      }
+    },
+    "category_entry": {
+      "type": "object",
+      "required": ["entry_id", "disposition", "target"],
+      "additionalProperties": false,
+      "properties": {
+        "entry_id": {
+          "type": "string",
+          "pattern": "^dep_[0-9]{3,}$",
+          "description": "Cross-reference to dependency_plan.json:plan[].entry_id (not enforced by JSON Schema)."
+        },
+        "disposition": {
+          "type": "string",
+          "enum": [
+            "bundle",
+            "real_impl",
+            "stub",
+            "mock",
+            "delegate_to_runtime",
+            "external_input",
+            "load_from_disk",
+            "remove"
+          ],
+          "description": "Disposition carried from dependency_plan.json."
+        },
+        "target": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Target symbol formatted as '<file>:<symbol>' (e.g. 'config.py:PREFIX_TEXT')."
+        },
+        "description": {
+          "type": "string",
+          "description": "Required for c1_identity entries (Rule 6-2): content_summary of the source C1 element, or first sentence of content_full truncated to 200 chars. Optional for other categories — present only when the source element carries semantic content downstream consumers would use."
+        }
+      }
+    },
+    "pipeline_parameter": {
+      "type": "object",
+      "required": ["name", "type", "required"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z_][a-z0-9_]*$",
+          "description": "Parameter name (snake_case, valid Python identifier)."
+        },
+        "type": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Type annotation as a Python source string (e.g. 'str', 'list[str]', 'TriageInput')."
+        },
+        "required": {
+          "type": "boolean",
+          "description": "True when the parameter has no default value."
+        },
+        "default": {
+          "description": "Optional. Default value as a JSON scalar. Present only when required is false. Cross-reference invariant (not enforced by JSON Schema): present iff required is false."
+        }
+      }
+    }
+  }
+}

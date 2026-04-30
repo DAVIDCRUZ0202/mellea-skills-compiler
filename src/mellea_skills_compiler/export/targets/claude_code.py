@@ -1,0 +1,494 @@
+"""Claude Code target: translate a LoadedContext into a TranslationPlan.
+
+Supported modalities:
+  synchronous_oneshot   — sync Python subprocess via scripts/run.sh
+  streaming             — unbuffered async streaming via scripts/run.sh
+  conversational_session — session carry-forward via --session JSON arg
+"""
+
+from __future__ import annotations
+
+import re
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from mellea_skills_compiler.export.exporter import AdapterFile, LoadedContext, ParsedSignature, TranslationPlan
+
+SUPPORTED_MODALITIES = {
+    "synchronous_oneshot",
+    "streaming",
+    "conversational_session",
+}
+
+
+def translate_claude_code(loaded: "LoadedContext") -> "TranslationPlan":
+    from mellea_skills_compiler.export.exporter import AdapterFile, TranslationPlan
+
+    manifest = loaded.manifest
+    sig = loaded.sig
+    warnings: list[str] = []
+
+    package_name = manifest["package_name"]
+    skill_name = _to_snake(package_name)
+    modality = manifest.get("modality", "synchronous_oneshot")
+    export_version = _export_version()
+
+    if modality not in SUPPORTED_MODALITIES:
+        warnings.append(
+            f"Modality '{modality}' is not fully supported by the claude-code target. "
+            "Falling back to synchronous_oneshot adapter."
+        )
+        modality = "synchronous_oneshot"
+
+    run_sh = _render_run_sh(
+        modality=modality,
+        package_name=package_name,
+        entry_module=loaded.entry_module,
+        entry_function=sig.function_name,
+        pattern=sig.pattern,
+        params=sig.params,
+        export_version=export_version,
+    )
+
+    skill_md = _render_skill_md(
+        manifest=manifest,
+        skill_name=skill_name,
+        modality=modality,
+        sig=sig,
+    )
+
+    pyproject_toml = _render_pyproject_toml(
+        skill_name=skill_name,
+        package_name=package_name,
+    )
+
+    readme = _render_readme(
+        skill_name=skill_name,
+        package_name=package_name,
+        modality=modality,
+        sig=sig,
+    )
+
+    adapter_files: list["AdapterFile"] = [
+        AdapterFile("SKILL.md", skill_md),
+        AdapterFile("scripts/run.sh", run_sh),
+        AdapterFile("pyproject.toml", pyproject_toml),
+        AdapterFile("README.md", readme),
+    ]
+
+    deployment_guidance = _deployment_guidance(modality, skill_name)
+
+    return TranslationPlan(
+        graph_name=skill_name,
+        adapter_files=adapter_files,
+        bundled_package_name=package_name,
+        warnings=warnings,
+        deployment_guidance=deployment_guidance,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Field resolution
+# ---------------------------------------------------------------------------
+
+def _to_snake(s: str) -> str:
+    s = re.sub(r"[^a-zA-Z0-9_]", "_", s)
+    s = re.sub(r"_+", "_", s).strip("_").lower()
+    return s or "pipeline"
+
+
+def _export_version() -> str:
+    from mellea_skills_compiler.export.exporter import EXPORT_VERSION
+    return EXPORT_VERSION
+
+
+def _get_description(manifest: dict) -> str:
+    """Extract description from first C1 entry, or use default."""
+    runtime_metadata = manifest.get("runtime_metadata", {})
+    if isinstance(runtime_metadata, dict) and runtime_metadata:
+        c1 = runtime_metadata.get("c1_identity", {})
+        if isinstance(c1, dict):
+            entries = c1.get("entries", [])
+            if entries and isinstance(entries[0], dict):
+                desc = entries[0].get("description", "")
+                if desc:
+                    return desc
+    categories = manifest.get("categories_resolved", {})
+    if isinstance(categories, dict):
+        c1 = categories.get("c1_identity", {})
+        if isinstance(c1, dict):
+            entries = c1.get("entries", [])
+            if entries and isinstance(entries[0], dict):
+                desc = entries[0].get("description", "")
+                if desc:
+                    return desc
+    return "A Mellea pipeline skill."
+
+
+# ---------------------------------------------------------------------------
+# scripts/run.sh renderers
+# ---------------------------------------------------------------------------
+
+def _render_run_sh(
+    *,
+    modality: str,
+    package_name: str,
+    entry_module: str,
+    entry_function: str,
+    pattern: str,
+    params: list[dict],
+    export_version: str,
+) -> str:
+    dispatch = {
+        "synchronous_oneshot": _run_sh_synchronous_oneshot,
+        "streaming": _run_sh_streaming,
+        "conversational_session": _run_sh_conversational_session,
+    }
+    return dispatch[modality](
+        package_name=package_name,
+        entry_module=entry_module,
+        entry_function=entry_function,
+        pattern=pattern,
+        params=params,
+        export_version=export_version,
+    )
+
+
+def _bash_header(export_version: str) -> str:
+    return (
+        "#!/usr/bin/env bash\n"
+        f"# Generated by melleafy-export v{export_version}\n"
+        "set -euo pipefail\n"
+        'SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"\n'
+        'ADAPTER_DIR="$(dirname "$SCRIPT_DIR")"\n'
+        'export PYTHONPATH="${ADAPTER_DIR}:${PYTHONPATH:-}"\n'
+    )
+
+
+def _invocation_args(pattern: str, params: list[dict]) -> str:
+    """Build the invocation args string for the Python inline script.
+
+    sys.argv[0] is '-c', sys.argv[1] is '--' (end-of-options separator),
+    so real positional args start at sys.argv[2].
+    """
+    if pattern == "no_args":
+        return ""
+    if pattern == "single_positional":
+        return "sys.argv[2]"
+    # dict_unpack — pass required params as positional in order
+    required = [p for p in params if p["required"]]
+    if not required:
+        return ""
+    args = ", ".join(f"sys.argv[{i + 2}]" for i in range(len(required)))
+    return args
+
+
+def _run_sh_synchronous_oneshot(
+    *,
+    package_name: str,
+    entry_module: str,
+    entry_function: str,
+    pattern: str,
+    params: list[dict],
+    export_version: str,
+) -> str:
+    inv_args = _invocation_args(pattern, params)
+    header = _bash_header(export_version)
+    return (
+        header
+        + "\n"
+        + "exec python -c \"\n"
+        + "import json, sys\n"
+        + f"from {package_name}.{entry_module} import {entry_function}\n"
+        + "try:\n"
+        + f"    result = {entry_function}({inv_args})\n"
+        + "except Exception as exc:\n"
+        + "    print(json.dumps({'status': 'error', 'message': str(exc)}), file=sys.stderr)\n"
+        + "    sys.exit(1)\n"
+        + "if hasattr(result, 'model_dump'):\n"
+        + "    output = result.model_dump()\n"
+        + "elif result is None:\n"
+        + "    output = None\n"
+        + "else:\n"
+        + "    output = str(result)\n"
+        + "print(json.dumps({'status': 'ok', 'output': output}))\n"
+        + "\" -- \"$@\"\n"
+    )
+
+
+def _streaming_call(entry_function: str, pattern: str, params: list[dict]) -> str:
+    """Generate the async-for call line for a streaming node, respecting pattern."""
+    if pattern == "no_args":
+        return f"    async for chunk in {entry_function}():\n"
+    if pattern == "single_positional":
+        return f"    async for chunk in {entry_function}(sys.argv[2]):\n"
+    # dict_unpack — pass required params as named kwargs in declaration order
+    required = [p for p in params if p["required"]]
+    if not required:
+        return f"    async for chunk in {entry_function}():\n"
+    named = ", ".join(f"{p['name']}=sys.argv[{i + 2}]" for i, p in enumerate(required))
+    return f"    async for chunk in {entry_function}({named}):\n"
+
+
+def _run_sh_streaming(
+    *,
+    package_name: str,
+    entry_module: str,
+    entry_function: str,
+    pattern: str,
+    params: list[dict],
+    export_version: str,
+) -> str:
+    header = _bash_header(export_version)
+    call_line = _streaming_call(entry_function, pattern, params)
+    return (
+        header
+        + "\n"
+        + "python -u - \"$@\" <<'PYEOF'\n"
+        + "import sys, asyncio, json\n"
+        + f"from {package_name}.{entry_module} import {entry_function}\n"
+        + "\n"
+        + "async def main():\n"
+        + call_line
+        + "        print(chunk, end=\"\", flush=True)\n"
+        + "    print()\n"
+        + "\n"
+        + "asyncio.run(main())\n"
+        + "PYEOF\n"
+    )
+
+
+def _run_sh_conversational_session(
+    *,
+    package_name: str,
+    entry_module: str,
+    entry_function: str,
+    pattern: str,
+    params: list[dict],
+    export_version: str,
+) -> str:
+    header = _bash_header(export_version)
+    return (
+        header
+        + "\n"
+        + "python - \"$@\" <<'PYEOF'\n"
+        + "import sys, json, argparse, inspect\n"
+        + f"from {package_name}.{entry_module} import {entry_function}\n"
+        + "\n"
+        + "parser = argparse.ArgumentParser()\n"
+        + "parser.add_argument(\"--input\", required=True)\n"
+        + "parser.add_argument(\"--session\", default=\"[]\")\n"
+        + "args = parser.parse_args()\n"
+        + "\n"
+        + "prior_turns = json.loads(args.session)\n"
+        + "try:\n"
+        + f"    _sig = inspect.signature({entry_function})\n"
+        + f"    if 'session' in _sig.parameters:\n"
+        + f"        result = {entry_function}(args.input, session=prior_turns)\n"
+        + f"    else:\n"
+        + f"        result = {entry_function}(args.input)\n"
+        + "    if hasattr(result, 'model_dump'):\n"
+        + "        output = result.model_dump()\n"
+        + "    else:\n"
+        + "        output = str(result)\n"
+        + "    print(json.dumps({\"status\": \"ok\", \"output\": output,\n"
+        + "                      \"session\": [*prior_turns, {\"input\": args.input, \"output\": output}]}))\n"
+        + "except Exception as exc:\n"
+        + "    print(json.dumps({\"status\": \"error\", \"message\": str(exc)}), file=sys.stderr)\n"
+        + "    sys.exit(1)\n"
+        + "PYEOF\n"
+    )
+
+
+# ---------------------------------------------------------------------------
+# SKILL.md
+# ---------------------------------------------------------------------------
+
+def _render_skill_md(
+    *,
+    manifest: dict,
+    skill_name: str,
+    modality: str,
+    sig: "ParsedSignature",
+) -> str:
+    description = _get_description(manifest)
+    display_name = skill_name.replace("_", " ").title()
+
+    arg_note = _skill_md_arg_note(sig, modality)
+
+    return (
+        f"---\n"
+        f"name: {skill_name}\n"
+        f"description: {description}\n"
+        f"---\n"
+        f"\n"
+        f"# {display_name}\n"
+        f"\n"
+        f"{description}\n"
+        f"\n"
+        f"## Invocation\n"
+        f"\n"
+        f"This skill is invoked by running `scripts/run.sh`.{arg_note}\n"
+        f"\n"
+        f"## Output format\n"
+        f"\n"
+        f'stdout: `{{"status": "ok", "output": <result>}}`\n'
+        f'stderr on error: `{{"status": "error", "message": <description>}}`\n'
+        f"\n"
+        f"Exit code 0 on success, non-zero on error.\n"
+    )
+
+
+def _skill_md_arg_note(sig: "ParsedSignature", modality: str) -> str:
+    if modality == "conversational_session":
+        return " Pass `--input <text>` and optionally `--session <json-array>` to carry prior turns."
+    if sig.pattern == "no_args":
+        return " No arguments required."
+    if sig.pattern == "single_positional":
+        required = [p for p in sig.params if p["required"]]
+        arg_name = required[0]["name"] if required else sig.params[0]["name"]
+        return f" Pass `{arg_name}` as the first positional argument."
+    # dict_unpack
+    required = [p for p in sig.params if p["required"]]
+    if required:
+        args_str = " ".join(f"<{p['name']}>" for p in required)
+        return f" Pass required arguments as positional values: `{args_str}`."
+    return ""
+
+
+# ---------------------------------------------------------------------------
+# pyproject.toml
+# ---------------------------------------------------------------------------
+
+def _render_pyproject_toml(*, skill_name: str, package_name: str) -> str:
+    return (
+        "[build-system]\n"
+        'requires = ["setuptools>=68"]\n'
+        'build-backend = "setuptools.build_meta"\n'
+        "\n"
+        "[project]\n"
+        f'name = "{skill_name}-claude-code-adapter"\n'
+        'version = "0.1.0"\n'
+        f'description = "Claude Code adapter for {skill_name} Mellea pipeline"\n'
+        'requires-python = ">=3.11"\n'
+        "dependencies = []\n"
+        "\n"
+        "[tool.setuptools.packages.find]\n"
+        'where = ["."]\n'
+        f'include = ["{package_name}*"]\n'
+    )
+
+
+# ---------------------------------------------------------------------------
+# README.md
+# ---------------------------------------------------------------------------
+
+_MODALITY_NOTES = {
+    "synchronous_oneshot": (
+        "This skill uses **synchronous oneshot** invocation. "
+        "Each call runs the pipeline to completion and returns a single JSON result."
+    ),
+    "streaming": (
+        "This skill uses **streaming** invocation. "
+        "Output is printed incrementally as it is generated."
+    ),
+    "conversational_session": (
+        "This skill uses **conversational session** invocation. "
+        "Pass `--session` as a JSON array of prior turns to maintain conversation history."
+    ),
+}
+
+_MODALITY_INVOCATION_EXAMPLE = {
+    "synchronous_oneshot": "bash scripts/run.sh <arg1> [arg2 ...]",
+    "streaming": "bash scripts/run.sh <arg1> [arg2 ...]",
+    "conversational_session": (
+        "bash scripts/run.sh --input \"your message here\"\n"
+        "# With session history:\n"
+        "bash scripts/run.sh --input \"follow-up\" "
+        "--session '[{\"input\": \"previous\", \"output\": \"response\"}]'"
+    ),
+}
+
+
+def _render_readme(
+    *,
+    skill_name: str,
+    package_name: str,
+    modality: str,
+    sig: "ParsedSignature",
+) -> str:
+    display_name = skill_name.replace("_", " ").title()
+    modality_note = _MODALITY_NOTES.get(modality, _MODALITY_NOTES["synchronous_oneshot"])
+    invocation_example = _MODALITY_INVOCATION_EXAMPLE.get(
+        modality, _MODALITY_INVOCATION_EXAMPLE["synchronous_oneshot"]
+    )
+
+    return (
+        f"# {display_name} — Claude Code Adapter\n"
+        f"\n"
+        f"Exported Claude Code adapter for the `{skill_name}` Mellea pipeline.\n"
+        f"\n"
+        f"## Installation\n"
+        f"\n"
+        f"```bash\n"
+        f"pip install -e .\n"
+        f"```\n"
+        f"\n"
+        f"## Registration\n"
+        f"\n"
+        f"Copy this directory to your Claude Code skills folder:\n"
+        f"\n"
+        f"```bash\n"
+        f"# Project-level (recommended):\n"
+        f"cp -r . .claude/skills/{skill_name}/\n"
+        f"\n"
+        f"# Or user-level (available in all projects):\n"
+        f"cp -r . ~/.claude/skills/{skill_name}/\n"
+        f"```\n"
+        f"\n"
+        f"## Invocation\n"
+        f"\n"
+        f"```bash\n"
+        f"{invocation_example}\n"
+        f"```\n"
+        f"\n"
+        f"## Modality\n"
+        f"\n"
+        f"{modality_note}\n"
+        f"\n"
+        f"## Output format\n"
+        f"\n"
+        f"```json\n"
+        f'{{"status": "ok", "output": <result>}}\n'
+        f"```\n"
+        f"\n"
+        f"On error (stderr):\n"
+        f"\n"
+        f"```json\n"
+        f'{{"status": "error", "message": "<description>"}}\n'
+        f"```\n"
+        f"\n"
+        f"Exit code 0 on success, non-zero on error.\n"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Deployment guidance
+# ---------------------------------------------------------------------------
+
+def _deployment_guidance(modality: str, skill_name: str) -> str:
+    guides = {
+        "synchronous_oneshot": (
+            f"Install with `pip install -e .` and register under `.claude/skills/{skill_name}/`. "
+            "Invoke via `bash scripts/run.sh <args>`."
+        ),
+        "streaming": (
+            f"Install with `pip install -e .` and register under `.claude/skills/{skill_name}/`. "
+            "Output streams incrementally — suitable for long-running or token-by-token responses."
+        ),
+        "conversational_session": (
+            f"Install with `pip install -e .` and register under `.claude/skills/{skill_name}/`. "
+            "Pass `--session` JSON array across calls to maintain conversation history."
+        ),
+    }
+    return guides.get(modality, f"Install with `pip install -e .` and register the skill.")

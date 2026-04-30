@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "deny": [
+      "Write(skills/weather/weather_mellea/config.py)",
+      "Edit(skills/weather/weather_mellea/config.py)",
+      "Write(skills/weather/weather_mellea/fixtures/**)",
+      "Edit(skills/weather/weather_mellea/fixtures/**)"
+    ]
+  }
+}

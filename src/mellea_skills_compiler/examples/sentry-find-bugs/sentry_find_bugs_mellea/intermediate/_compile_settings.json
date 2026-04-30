@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "deny": [
+      "Write(sentry_find_bugs_mellea/config.py)",
+      "Edit(sentry_find_bugs_mellea/config.py)",
+      "Write(sentry_find_bugs_mellea/fixtures/**)",
+      "Edit(sentry_find_bugs_mellea/fixtures/**)"
+    ]
+  }
+}
