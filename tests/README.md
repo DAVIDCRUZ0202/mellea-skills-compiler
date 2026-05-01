@@ -1,6 +1,6 @@
-# GraniteClaw Tests
+# Mellea Skills Compiler Tests
 
-This directory contains unit tests for the GraniteClaw package.
+This directory contains unit tests for the Mellea Skills Compiler package.
 
 ## Dependencies
 
@@ -22,7 +22,7 @@ pytest
 
 ### Run tests with coverage
 ```bash
-pytest --cov=graniteclaw --cov-report=html
+pytest --cov=mellea_skills_compiler --cov-report=html
 ```
 
 ### Run specific test file
@@ -32,8 +32,8 @@ pytest tests/test_enums.py
 
 ### Run specific test class or function
 ```bash
-pytest tests/test_compliance.py::TestComplianceSummary
-pytest tests/test_file_utils.py::TestParseSkillMd::test_parse_with_valid_frontmatter
+pytest tests/mellea_skills_compiler/certification/test_compliance.py::TestComplianceSummary
+pytest tests/mellea_skills_compiler/toolkit/test_file_utils.py::TestParseSkillMd::test_parse_with_valid_frontmatter
 ```
 
 ### Run with verbose output
@@ -48,10 +48,7 @@ pytest -s
 
 ## Test Structure
 
-- `tests/graniteclaw/toolkit/test_enums.py` - Tests for enum definitions
-- `tests/graniteclaw/toolkit/test_file_utils.py` - Tests for file parsing utilities
-- `tests/graniteclaw/certification/test_ingest.py` - Tests for risk only ingestion pipeline
-- `tests/graniteclaw/certification/test_nexus_policy.py` - Tests for policy manifest and Nexus integration
-- `tests/graniteclaw/certification/test_compliance.py` - Tests for compliance classification and reporting
-- `tests/graniteclaw/test_skill_utility.py` - Tests for skill loading and validation
-- `tests/graniteclaw/guardian/test_audit_trail.py` - Tests for audit trail plugin
+- `tests/mellea_skills_compiler/toolkit/test_file_utils.py` - Tests for file parsing utilities
+- `tests/mellea_skills_compiler/certification/test_nexus_policy.py` - Tests for policy manifest and Nexus integration
+- `tests/mellea_skills_compiler/certification/test_compliance.py` - Tests for compliance classification and reporting
+- `tests/mellea_skills_compiler/guardian/test_audit_trail.py` - Tests for audit trail plugin
