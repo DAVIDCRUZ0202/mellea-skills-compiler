@@ -229,9 +229,10 @@ See [`skills/README.md`](skills/README.md) for the full per-skill tier table and
 ```
 src/mellea_skills_compiler/  # pip-installable package
   certification/           # Ingest → policy → compliance → certification report
+  compile/                 # Compile Mellea skill specification into a Mellea pipeline using mellea-fy Claude command.
   guardian/                # Granite Guardian hooks for Mellea pipelines
   toolkit/                 # Shared utilities and enums
-  taxonomy/                # Risk taxonomy support
+  export/                  # Export a compiled Mellea skill to a deployment target
 mellea-fy/                 # Claude Code /mellea-fy command definition
 skills/                    # Skill specs, compiled pipelines, and fixtures
 examples/                  # mellea-fy output examples and demos
@@ -273,7 +274,7 @@ Mellea Skills Compiler is an active research project. The current release demons
 - **Claude Code required for compilation** — Both `mellea-skills compile` and `/mellea-fy` invoke Claude Code under the hood for specification decomposition
 - **Static compliance classification** — YAML-based action-to-control mapping, not yet validated against ground truth
 - **Single domain evaluation** — Certification pipeline has been tested primarily on security and utility skills
-- **Python version constraints** — `ai-atlas-nexus` requires Python 3.11–3.12; Mellea supports 3.13+. Use Python 3.12 for the full pipeline.
+- **Python version constraints** — Python >=3.11 and <3.14.4 (ai-atlas-nexus requires 3.11+ and <3.14.4; Mellea supports 3.11+)
 
 ## Contributing
 
