@@ -1,15 +1,11 @@
 import json
-import os
 import shutil
-import socketserver
 import subprocess
-import threading
-import time
 from pathlib import Path
 from typing import Dict, Optional
 from urllib.parse import urlparse
+from typing import Optional
 
-from anthropic import Anthropic
 from rich import print as rprint
 from rich.console import Console
 from rich.panel import Panel
@@ -17,7 +13,6 @@ from rich.panel import Panel
 from mellea_skills_compiler.compile.claude_directives import (
     build_system_prompt,
     resolve_runtime_defaults,
-    write_compile_settings,
     write_runtime_directive,
 )
 from mellea_skills_compiler.compile.grounding import (
@@ -26,10 +21,12 @@ from mellea_skills_compiler.compile.grounding import (
 )
 from mellea_skills_compiler.compile.proxy import ContextMgmtStrippingProxy
 from mellea_skills_compiler.compile.writers.renderer import render_writers
+from mellea_skills_compiler.compile.backend import (
+    CompilationContext,
+    get_backend,
+    list_backends,
+)
 from mellea_skills_compiler.enums import (
-    ClaudeResponseMessageType,
-    ClaudeResponseType,
-    InferenceModel,
     SpecFileFormat,
 )
 from mellea_skills_compiler.toolkit.file_utils import (
@@ -210,7 +207,17 @@ def compile(
     refresh_cache: bool = False,
     skill_backend: Optional[str] = None,
     skill_model: Optional[str] = None,
+    backend: str = "claude",
 ) -> None:
+    # Validate backend parameter
+    available_backends = list_backends()
+    if backend not in available_backends:
+        raise ValueError(
+            f"Unknown backend '{backend}'. Available backends: {', '.join(available_backends)}"
+        )
+    
+    LOGGER.info("Using compilation backend: %s", backend)
+    
     # clears screen
     subprocess.run(["clear"])
 
@@ -439,9 +446,41 @@ def compile(
 
     # Create processing animation
     processing = console.status(
-        "[italic bold yellow]Processing...[/]", spinner_style="status.spinner"
+        "[italic bold yellow]Processing...[/]", spinner_style="status.spinner")
+    # Get the backend implementation
+    backend_impl = get_backend(backend)
+    
+    # Validate backend environment
+    is_valid, error_msg = backend_impl.validate_environment()
+    if not is_valid:
+        raise RuntimeError(f"Backend '{backend}' not available: {error_msg}")
+    
+    LOGGER.info("Backend '%s' environment validated successfully", backend)
+    
+    # Build compilation context
+    context = CompilationContext(
+        spec_path=spec_path,
+        package_dir=package_dir,
+        intermediate_dir=intermediate_dir,
+        model=model,
+        timeout=timeout,
+        repair_mode=repair_mode,
+        skill_backend=chosen_backend,
+        skill_model=chosen_model_id,
+        refresh_cache=refresh_cache,
     )
+    
+    # Execute compilation via backend
+    LOGGER.info("Starting compilation with backend '%s'", backend)
+    result = backend_impl.compile(context)
+    
+    if not result.success:
+        raise RuntimeError(f"Compilation failed: {result.error_message}")
+    
+    LOGGER.info("Backend compilation completed successfully")
 
+    # Post-processing: copy spec file into the compiled directory (name may differ from frontmatter
+    # because melleafy normalises hyphens → underscores per Rule OUT-2)
     try:
         process = subprocess.Popen(
             claude_argv,
@@ -513,6 +552,39 @@ def compile(
         if mellea_dir.exists():
             # Render respective artefact writers
             render_writers(mellea_dir, enforce=True)
+        skill_dir = spec_path if spec_path.is_dir() else spec_path.parent
+        mellea_dirs = [
+            d for d in skill_dir.iterdir() if d.is_dir() and d.name.endswith("_mellea")
+        ]
+        if mellea_dirs:
+            # Wrapper-side writer invocation (migration phase: WARN only).
+            # Reads intermediate/<artifact>_emission.json, runs the deterministic
+            # writer in .claude/melleafy/writers/, and diffs the output against
+            # the file the LLM put on disk. Logs WARN on diff so we can build
+            # confidence the diffs are stable before flipping to ENFORCE mode.
+            try:
+                from mellea_skills_compiler.compile.writer_renderer import (
+                    default_writer_specs,
+                    render_writers,
+                )
+
+                # Repo root = directory holding `.claude/`. Walk up from the
+                # package dir until we find it.
+                repo_root = mellea_dirs[0]
+                for parent in [repo_root, *repo_root.parents]:
+                    if (parent / ".claude" / "melleafy" / "writers").is_dir():
+                        repo_root = parent
+                        break
+                render_writers(
+                    mellea_dirs[0],
+                    default_writer_specs(repo_root),
+                    enforce=True,  # config.py promoted from WARN to ENFORCE in Step 3
+                )
+            except Exception as renderer_exc:  # noqa: BLE001
+                LOGGER.warning(
+                    "Writer renderer failed (non-fatal during migration): %s",
+                    renderer_exc,
+                )
 
             # validate compiled skill pipeline
             validate(mellea_dir, no_run=no_run, all_fixtures=False)
@@ -528,13 +600,15 @@ def compile(
         if process and process.poll() is None:
             process.kill()
             process.wait()
-        raise
+        raise RuntimeError(
+                f"No *_mellea directory found in {skill_dir} after compilation"
+            )
     except Exception as e:
         processing.stop()
         if process and process.poll() is None:
             process.kill()
             process.wait()
-        raise Exception(f"Mellea-fy skill compilation failed - {str(e)}") from e
+            raise RuntimeError(f"Compilation failed with backend '{backend}': {str(e)}") from e
     finally:
         proxy_server.shutdown()
 
