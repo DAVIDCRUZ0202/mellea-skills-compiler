@@ -176,9 +176,11 @@ mellea-skills certify <Your-local-path>/skills/weather/weather_mellea --fixture 
 mellea-skills certify <Your-local-path>/skills/weather/weather_mellea --model granite3.3:8b --guardian-model ibm/granite3.3-guardian:8b --inference-engine ollama    # Using different risk model, guardian model and inference engine
 ```
 
-### Export Compiled Skill Pipeline
+### Export Compiled Mellea Skill
 
-Run skill pipeline for a given fxiture
+Export a compiled Mellea skill to a deployment target - langgraph, claude-code, or mcp
+
+**Note**: This command is experimental. Output structure and CLI interface may change in future releases without a deprecation period.
 
 ```bash
 mellea-skills export <Your-local-path>/skills/weather/weather_mellea mcp         # Supported deployment target: mcp, langgraph, claude-code
