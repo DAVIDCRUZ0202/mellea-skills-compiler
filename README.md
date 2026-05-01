@@ -183,8 +183,8 @@ Export a compiled Mellea skill to a deployment target - langgraph, claude-code, 
 **Note**: This command is experimental. Output structure and CLI interface may change in future releases without a deprecation period.
 
 ```bash
-mellea-skills export <Your-local-path>/skills/weather/weather_mellea mcp         # Supported deployment target: mcp, langgraph, claude-code
-mellea-skills export --force <Your-local-path>/skills/weather/weather_mellea claude-code # '--force' overwrites output directory if it already exists.
+mellea-skills export --target mcp <Your-local-path>/skills/weather/weather_mellea         # Supported deployment target: mcp, langgraph, claude-code
+mellea-skills export --target mcp --force <Your-local-path>/skills/weather/weather_mellea # '--force' overwrites output directory if it already exists.
 ```
 
 

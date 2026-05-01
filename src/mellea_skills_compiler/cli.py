@@ -361,7 +361,9 @@ def export(
     ],
     target: Annotated[
         str,
-        typer.Argument(
+        typer.Option(
+            "--target",
+            "-t",
             help="Deployment target: langgraph | claude-code | mcp",
         ),
     ],
