@@ -93,13 +93,13 @@ git clone https://github.com/generative-computing/mellea-skills-compiler
 Create Python environment and install library
 ```bash
 # Requires Python >=3.11, <3.14.4
-python3.14.0 -m venv .venv
+python3 -m venv .venv
 source .venv/bin/activate
 
 pip install -e .
 ```
 
-Set required environment variables:
+Set Ollama API URL in the environment variables:
 
 ```bash
 export OLLAMA_API_URL=<ollama-api-url>
@@ -110,6 +110,20 @@ export OLLAMA_API_URL=<ollama-api-url>
 ### You can download the skill specifications from GitHub or use your own specification file.
 
 Example skills: https://github.com/generative-computing/mellea-skills-compiler/tree/main/skills
+
+### Ollama Models
+
+We recommend downloading the Ollama models `granite3.3:8b` and `ibm/granite3.3-guardian:8b` beforehand, as they are set as defaults.
+
+For Risk Identification
+```
+ollama pull granite3.3:8b
+```
+
+For Risk Assessment
+```
+ollama pull ibm/granite3.3-guardian:8b
+```
 
 ### Compile a skill specification
 
@@ -160,6 +174,15 @@ mellea-skills certify <Your-local-path>/skills/weather/weather_mellea           
 mellea-skills certify <Your-local-path>/skills/weather/weather_mellea --enforce            # Block on risk detection
 mellea-skills certify <Your-local-path>/skills/weather/weather_mellea --fixture rain_check # Run specific fixture - rain_check
 mellea-skills certify <Your-local-path>/skills/weather/weather_mellea --model granite3.3:8b --guardian-model ibm/granite3.3-guardian:8b --inference-engine ollama    # Using different risk model, guardian model and inference engine
+```
+
+### Export Compiled Skill Pipeline
+
+Run skill pipeline for a given fxiture
+
+```bash
+mellea-skills export <Your-local-path>/skills/weather/weather_mellea mcp         # Supported deployment target: mcp, langgraph, claude-code
+mellea-skills export --force <Your-local-path>/skills/weather/weather_mellea claude-code # '--force' overwrites output directory if it already exists.
 ```
 
 
