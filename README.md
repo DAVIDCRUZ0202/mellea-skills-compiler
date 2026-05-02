@@ -207,10 +207,10 @@ The [`src/mellea_skills_compiler/examples/`](src/mellea_skills_compiler/examples
 
 | Skill | Tier | Archetype | Description |
 |-------|------|-----------|-------------|
-| [weather](src/mellea_skills_compiler/examples/weather/) | T1 | Fetch + summarise | Public no-auth HTTP to `wttr.in`; intent classification dispatches to one of seven URL templates |
-| [sentry-find-bugs](src/mellea_skills_compiler/examples/sentry-find-bugs/) | T1 / T2 | Structured analysis | Multi-phase OWASP review producing severity-classified findings; two stub helpers (`search_fn`, `read_file_fn`) for codebase-scanning fixtures |
-| [superpowers-systematic-debugging](src/mellea_skills_compiler/examples/superpowers-systematic-debugging/) | T1 | Constrained reasoning | Four-phase debugging walk with hypothesis testing; `fix_attempts_count >= 3` triggers architectural-issue branch |
-| [clawdefender](src/mellea_skills_compiler/examples/clawdefender/) | T3 | Adversarial classification | Prompt injection / SSRF / command injection / credential exfiltration detection; bundled scripts need `chmod +x` on Unix |
+| [weather](examples/weather/) | T1 | Fetch + summarise | Public no-auth HTTP to `wttr.in`; intent classification dispatches to one of seven URL templates |
+| [sentry-find-bugs](examples/sentry-find-bugs/) | T1 / T2 | Structured analysis | Multi-phase OWASP review producing severity-classified findings; two stub helpers (`search_fn`, `read_file_fn`) for codebase-scanning fixtures |
+| [superpowers-systematic-debugging](examples/superpowers-systematic-debugging/) | T1 | Constrained reasoning | Four-phase debugging walk with hypothesis testing; `fix_attempts_count >= 3` triggers architectural-issue branch |
+| [clawdefender](examples/clawdefender/) | T3 | Adversarial classification | Prompt injection / SSRF / command injection / credential exfiltration detection; bundled scripts need `chmod +x` on Unix |
 
 Each example includes the original `spec.md` (or `SKILL.md`), generated pipeline code, factory-shape fixtures, intermediate IR (`config_emission.json`, `fixtures_emission.json`, etc.), `mapping_report.md`, and `melleafy.json` manifest. See [`docs/README.md`](docs/README.md) for the runnable tutorial that walks through each one and [`docs/FROM_STUBS_TO_RUNNING.md`](docs/FROM_STUBS_TO_RUNNING.md) for the stub-implementation walkthrough.
 
