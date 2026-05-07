@@ -44,7 +44,6 @@ secrets = ["detect-secrets @ git+https://github.com/ibm/detect-secrets.git@maste
 source = "file"
 path = "src/mellea_skills_compiler/__init__.py"
 
-
 [project.scripts]
 mellea-skills = "mellea_skills_compiler.cli:app"
 
