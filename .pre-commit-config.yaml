@@ -24,7 +24,7 @@ repos:
       - id: isort
         name: isort (python)
         exclude: ^skills/
-        args: ["--profile", "black", "--filter-files"]
+        args: ["--profile", "black", "--line-length", "88", "--filter-files"]
   - repo: https://github.com/pre-commit/mirrors-prettier
     rev: v4.0.0-alpha.8
     hooks:
