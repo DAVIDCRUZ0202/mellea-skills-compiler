@@ -48,13 +48,13 @@ path = "src/mellea_skills_compiler/__init__.py"
 [project.scripts]
 mellea-skills = "mellea_skills_compiler.cli:app"
 
-[tool.isort]
-profile = "black"
-line_length = 88
-remove_redundant_aliases = true
-group_by_package = true
-combine_star = true
-lines_after_imports = 2
+# [tool.isort]
+# profile = "black"
+# line_length = 88
+# remove_redundant_aliases = true
+# group_by_package = true
+# combine_star = true
+# lines_after_imports = 2
 
 [tool.pdm.build]
 package-dir = "src"
