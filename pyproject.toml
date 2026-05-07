@@ -31,7 +31,6 @@ dependencies = [
     "ai-atlas-nexus[ollama]",
     "rich",
     "typer",
-    "isort",
     "anthropic",
     "packaging"
 ]
