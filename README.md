@@ -64,6 +64,8 @@ agent specification        spec → typed pipeline                   Guardian ho
 
 **Step 1: Compile** — A `.md` specification is decomposed into a typed Mellea pipeline package: Pydantic schemas, `@generative` extraction slots, requirement validators, and multi-phase orchestration code. Two compilation paths are available: the `mellea-skills compile` CLI command, or the `/mellea-fy` command inside Claude Code. See [`src/mellea_skills_compiler/examples/`](src/mellea_skills_compiler/examples/) for pre-compiled examples.
 
+> **Backend Abstraction** — The compilation process uses a pluggable backend architecture. Currently, only the Claude Code backend is supported (via `--backend claude`), but the abstraction layer enables future support for alternative compilation backends such as IBM Bob or local LLMs.
+
 **Step 2: Certify** — A single `mellea-skills certify` invocation performs end-to-end governance: AI Atlas Nexus identifies applicable risks from Granite Guardian, NIST AI RMF, and Credo UCF taxonomies and emits a `PolicyManifest`; Guardian hooks configured from that manifest monitor every `m.instruct()` call as fixtures execute; each governance requirement is classified as AUTOMATED, PARTIAL, or MANUAL based on runtime evidence; a compliance report and audit trail are written alongside the compiled pipeline.
 
 ## Install
@@ -152,6 +154,12 @@ mellea-skills compile <Your-local-path>/skills/weather/spec.md --model aws/claud
 mellea-skills compile <Your-local-path>/skills/weather --model aws/claude-opus-4-5
 ```
 
+The `--backend` flag allows you to specify which compilation backend to use (currently only `claude` is supported):
+```bash
+mellea-skills compile <Your-local-path>/skills/weather/spec.md --backend claude  # Explicit backend selection
+mellea-skills compile <Your-local-path>/skills/weather/spec.md                   # Uses 'claude' by default
+```
+
 Melleafy Repair: Identify and correct any errors effectively in Mellea skill compilation
 
 ```bash
@@ -196,8 +204,8 @@ Export a compiled Mellea skill to a deployment target - langgraph, claude-code, 
 **Note**: This command is experimental. Output structure and CLI interface may change in future releases without a deprecation period.
 
 ```bash
-mellea-skills export --target mcp <Your-local-path>/skills/weather/weather_mellea         # Supported deployment target: mcp, langgraph, claude-code
-mellea-skills export --target mcp --force <Your-local-path>/skills/weather/weather_mellea # '--force' overwrites output directory if it already exists.
+mellea-skills export <Your-local-path>/skills/weather/weather_mellea mcp         # Supported deployment target: mcp, langgraph, claude-code
+mellea-skills export --force <Your-local-path>/skills/weather/weather_mellea claude-code # '--force' overwrites output directory if it already exists.
 ```
 
 ### Certification artifacts
@@ -285,7 +293,7 @@ Mellea Skills Compiler is an active research project. The current release demons
 ## Known Limitations
 
 - **Research preview** — APIs, CLI, and artifact formats may change
-- **Claude Code required for compilation** — Both `mellea-skills compile` and `/mellea-fy` invoke Claude Code under the hood for specification decomposition
+- **Claude Code required for compilation** — Both `mellea-skills compile` and `/mellea-fy` invoke Claude Code under the hood for specification decomposition. The compilation backend is now pluggable (via `--backend` flag), but currently only the `claude` backend is implemented. Future releases will add support for alternative backends such as IBM Bob and local LLMs.
 - **Static compliance classification** — YAML-based action-to-control mapping, not yet validated against ground truth
 - **Single domain evaluation** — Certification pipeline has been tested primarily on security and utility skills
 - **Python version constraints** — Python >=3.11 and <3.14.4 (ai-atlas-nexus requires 3.11+ and <3.14.4; Mellea supports 3.11+)

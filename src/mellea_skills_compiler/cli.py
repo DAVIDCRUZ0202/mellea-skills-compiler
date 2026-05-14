@@ -35,7 +35,7 @@ def main() -> None:
 
 @app.command(
     help="Melleafy Compile: Decompose an Agent Spec into Mellea Code",
-    epilog="Compile Mellea skill specification into a Mellea pipeline using mellea-fy Claude command.",
+    epilog="Compile Mellea skill specification into a Mellea pipeline. Use --backend to select compilation backend (currently only 'claude' is supported).",
 )
 def compile(
     ctx: typer.Context,
@@ -99,6 +99,14 @@ def compile(
             "(default from mellea_skills_compiler/compile/claude/data/runtime_defaults.json).",
         ),
     ] = None,
+    backend: Annotated[
+        str,
+        typer.Option(
+            "--backend",
+            "-b",
+            help="Compilation backend to use. Currently only 'claude' is supported.",
+        ),
+    ] = "claude",
 ):
     """
     Compile Mellea skill specification into a Mellea pipeline using mellea-fy Claude command.
@@ -109,6 +117,17 @@ def compile(
     smoke-check passed (or skipped because backend was unreachable).
     """
     spec_path = Path(spec_path)
+    
+    # Validate backend parameter
+    from mellea_skills_compiler.compile.backend import list_backends
+    
+    available = list_backends()
+    if backend not in available:
+        LOGGER.error(
+            f"Unknown backend '{backend}'. Available backends: {', '.join(available)}"
+        )
+        raise typer.Exit(code=1)
+    
     try:
         from mellea_skills_compiler.compile import mellea_skills
 
@@ -121,6 +140,7 @@ def compile(
             refresh_cache=refresh_cache,
             skill_backend=skill_backend,
             skill_model=skill_model,
+            backend=backend,
         )
     except Exception as e:
         LOGGER.error(str(e))
@@ -362,9 +382,7 @@ def export(
     ],
     target: Annotated[
         str,
-        typer.Option(
-            "--target",
-            "-t",
+        typer.Argument(
             help="Deployment target: langgraph | claude-code | mcp",
         ),
     ],
