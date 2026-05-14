@@ -266,7 +266,7 @@ def ingest(
         ),
     ] = None,
     inference_engine: Annotated[
-        Literal["ollama"],
+        str,
         typer.Option(
             "--inference-engine",
             "-i",
@@ -338,7 +338,7 @@ def certify(
         ),
     ] = None,
     inference_engine: Annotated[
-        Literal["ollama"],
+        str,
         typer.Option(
             "--inference-engine",
             "-i",
