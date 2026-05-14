@@ -73,7 +73,7 @@ class InferenceService:
             INFERENCE_ENGINE_CACHE[cache_key] = self.inference_engine_class(
                 model_name_or_path=model_name_or_path,
                 credentials=self.credentials,
-                parameters=parameters or {},
+                parameters=parameters or {},  # type: ignore[arg-type]
                 **kwargs,
             )
         return INFERENCE_ENGINE_CACHE[cache_key]

@@ -1,4 +1,7 @@
-def skill_to_use_case(parsed: dict, sensitivity: dict) -> str:
+from typing import Any
+
+
+def skill_to_use_case(parsed: dict[str, Any], sensitivity: dict[str, Any]) -> str:
     """Compose a use-case description from parsed skill + sensitivity."""
     fm = parsed["frontmatter"]
     name = fm.get("name", "unknown skill")

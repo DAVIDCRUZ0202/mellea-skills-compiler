@@ -46,7 +46,7 @@ def compile(
         ),
     ],
     model: Annotated[
-        str,
+        Optional[str],
         typer.Option(
             "--model",
             "-m",
@@ -116,7 +116,7 @@ def compile(
     against the LLM backend. A green compile means compiled + lints passed +
     smoke-check passed (or skipped because backend was unreachable).
     """
-    spec_path = Path(spec_path)
+    spec_path_obj = Path(spec_path)
     
     # Validate backend parameter
     from mellea_skills_compiler.compile.backend import list_backends
@@ -132,7 +132,7 @@ def compile(
         from mellea_skills_compiler.compile import mellea_skills
 
         mellea_skills.compile(
-            spec_path,
+            spec_path_obj,
             model,
             timeout,
             repair_mode=repair_mode,
