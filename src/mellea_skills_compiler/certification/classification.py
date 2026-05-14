@@ -66,7 +66,7 @@ def classify_governance_requirements(
                             RequirementClassification(
                                 action=action,
                                 coverage=c_level,
-                                matched_controls=cat,
+                                matched_controls=[cat],
                             )
                         )
 

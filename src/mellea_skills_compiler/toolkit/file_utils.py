@@ -2,7 +2,7 @@ import importlib
 import re
 import sys
 from pathlib import Path
-from typing import Dict, List
+from typing import Any, Dict, List
 
 import yaml
 from rich.console import Console
@@ -97,7 +97,7 @@ def load_skill_pipeline(pipeline_dir: Path):
 
 
 # ── Load Fixtures ────────────────────────────────────────────────
-def load_fixtures(pipeline_dir: Path) -> List[Dict]:
+def load_fixtures(pipeline_dir: Path) -> list[dict[str, Any]]:
     """Load fixtures from the skill's fixtures/ directory.
 
     Supports two conventions:

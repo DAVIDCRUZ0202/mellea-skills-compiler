@@ -2,6 +2,7 @@ import json
 from collections import Counter
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
+from typing import Any
 
 from mellea_skills_compiler.enums import CoverageLevel, GovernanceTaxonomy
 from mellea_skills_compiler.toolkit.logging import configure_logger
@@ -69,7 +70,7 @@ class PolicyManifest:
         """List of risk names for logging/display."""
         return [r.name for r in self.risks]
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
     def to_json(self, path: str | None = None) -> str:
