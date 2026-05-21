@@ -187,7 +187,8 @@ Apply this per-mode distinction at the call site in `pipeline.py` too: every bra
 - `with start_session(BACKEND, MODEL_ID) as m:` context manager
 - Calls slots, requirements, and mobjects from other files
 - `DECIDE` logic: Python `if/elif/else` wrapping Mellea calls
-- MUST convert all non-string `grounding_context` values to `str()`
+- MUST thread the user input / per-call value into `m.instruct(description=...)` via `user_variables` + a `{{ key }}` Jinja placeholder in the description text — e.g. `m.instruct("Classify: {{ user_query }} ...", user_variables={"user_query": str(user_query)}, ...)`. Reserve `grounding_context` for document or reference material the description text explicitly cites — that is the channel the docs reserve for it (see https://docs.mellea.ai/how-to/working-with-data, which pairs `user_variables={"query": ...}` with `grounding_context={"doc0": doc0, ...}`). The per-backend prompt template (e.g. `mellea/templates/prompts/granite/Instruction.jinja2`) renders the `grounding_context` block under the header *"Write the response by aligning with the facts and items in the following grounding context"* — that framing fits supporting documents, not the value the model must directly extract from or classify; with `format=PydanticModel` constrained decoding, putting the primary input there produces silent extraction failures.
+- MUST convert any non-string `grounding_context` value with `str()`.
 - MUST use `format=PydanticModel` for every `m.instruct()` that produces structured output
 - MUST parse the thunk after every `m.instruct(format=Model)` before accessing any field or calling any Pydantic method. `m.instruct()` returns a `ComputedModelOutputThunk` — NOT a Pydantic model. Direct field access (`thunk.field_name`) or `.model_dump()` raises `AttributeError`. Always include `_parse_instruct_result` and `_safe_parse_with_fallback` helpers in `pipeline.py` and call them immediately after every `m.instruct(format=Model)` call:
 
@@ -366,9 +367,10 @@ while not verdict.passed and remediation_count < MAX_REMEDIATION_ITERATIONS:
     # Modification step: generate a fix
     with start_session(BACKEND, MODEL_ID) as m_fix:
         fix = m_fix.instruct(
-            "Generate a minimal patch to address the identified issue.",
-            grounding_context={
-                "current_code": patched_code,
+            "Generate a minimal patch for this code:\n{{ current_code }}\n\n"
+            "Issue to address:\n{{ verdict }}",
+            user_variables={
+                "current_code": str(patched_code),
                 "verdict": str(verdict.model_dump()),
             },
             format=CodeFix,
@@ -382,8 +384,12 @@ while not verdict.passed and remediation_count < MAX_REMEDIATION_ITERATIONS:
     # Re-evaluation step
     with start_session(BACKEND, MODEL_ID) as m_eval:
         verdict = _parse_instruct_result(
-            m_eval.instruct("Re-evaluate...", grounding_context={"code": patched_code}, format=Verdict),
-            Verdict
+            m_eval.instruct(
+                "Re-evaluate this code:\n{{ code }}",
+                user_variables={"code": str(patched_code)},
+                format=Verdict,
+            ),
+            Verdict,
         )
 ```
 
