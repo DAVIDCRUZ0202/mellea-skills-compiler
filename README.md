@@ -134,9 +134,9 @@ For Risk Assessment
 ollama pull ibm/granite3.3-guardian:8b
 ```
 
-### Interactive CLI
+### Node.js Interactive CLI
 
-Begin operation by using the Mellea Skills Compiler Interactive CLI or skip to the next step to use command-based CLI operation.
+Begin operation by using the Mellea Skills Compiler Node.js Interactive CLI or skip to the next step to use command-based CLI.
 
 ```
 ./mellea-skills-ui.sh

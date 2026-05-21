@@ -181,13 +181,15 @@ function showError(operation, error) {
 
   console.log('  ' + chalk.hex('#EC4899')('  ╔' + '═'.repeat(width) + '╗'));
   console.log('  ' + chalk.hex('#EC4899')('  ║') + ' '.repeat(width) + chalk.hex('#EC4899')('║'));
-  console.log('  ' + chalk.hex('#EC4899')('  ║') + '         ' + chalk.hex('#EC4899').bold('⚠️  ERROR  ⚠️') + ' '.repeat(width - 23) + chalk.hex('#EC4899')('║'));
+  console.log('  ' + chalk.hex('#EC4899')('  ║') + '         ' + chalk.hex('#EC4899').bold('⚠️  ERROR  ⚠️') + ' '.repeat(width - 22) + chalk.hex('#EC4899')('║'));
   console.log('  ' + chalk.hex('#EC4899')('  ║') + ' '.repeat(width) + chalk.hex('#EC4899')('║'));
-  console.log('  ' + chalk.hex('#EC4899')('  ║') + '    ' + chalk.white(`${operation} failed`) + ' '.repeat(Math.max(0, width - operation.length - 14)) + chalk.hex('#EC4899')('║'));
+  console.log('  ' + chalk.hex('#EC4899')('  ║') + '    ' + chalk.white(`${operation} failed`) + ' '.repeat(Math.max(0, width - operation.length - 11)) + chalk.hex('#EC4899')('║'));
   console.log('  ' + chalk.hex('#EC4899')('  ║') + '    ' + chalk.gray(error.message.substring(0, 60)) + ' '.repeat(Math.max(0, width - Math.min(60, error.message.length) - 4)) + chalk.hex('#EC4899')('║'));
   console.log('  ' + chalk.hex('#EC4899')('  ║') + ' '.repeat(width) + chalk.hex('#EC4899')('║'));
   console.log('  ' + chalk.hex('#EC4899')('  ╚' + '═'.repeat(width) + '╝'));
   console.log();
+
+  next_operation();
 }
 
 // Execute Python CLI with beautiful spinner
@@ -325,6 +327,35 @@ function cleanupProcessListeners() {
   }
 }
 
+async function next_operation() {
+  const { again } = await inquirer.prompt([
+    {
+      type: 'confirm',
+      name: 'again',
+      message: chalk.hex('#06FFA5').bold('Perform another operation'),
+      prefix: chalk.hex('#FFB703')('  🔄'),
+      default: true
+    }
+  ]);
+
+  // Clean up after the final prompt
+  cleanupKeypressListeners();
+  cleanupProcessListeners();
+
+  if (again) {
+    await runInteractive();
+  } else {
+    console.log();
+    const width = 66;
+    console.log('  ' + chalk.hex('#06FFA5')('  ╔' + '═'.repeat(width) + '╗'));
+    console.log('  ' + chalk.hex('#06FFA5')('  ║') + ' '.repeat(width) + chalk.hex('#06FFA5')('║'));
+    console.log('  ' + chalk.hex('#06FFA5')('  ║') + '           ' + chalk.hex('#06FFA5').bold('✨  SESSION COMPLETE  ✨') + ' '.repeat(width - 35) + chalk.hex('#06FFA5')('║'));
+    console.log('  ' + chalk.hex('#06FFA5')('  ║') + ' '.repeat(width) + chalk.hex('#06FFA5')('║'));
+    console.log('  ' + chalk.hex('#06FFA5')('  ╚' + '═'.repeat(width) + '╝'));
+    console.log();
+    }
+}
+
 // Main interactive flow
 async function runInteractive() {
   // Reset all state variables
@@ -455,16 +486,16 @@ async function runInteractive() {
             transformer: (input) => chalk.white(input)
           },
           {
-            type: 'list',
+            type: 'input',
             name: 'model',
-            message: chalk.hex('#3A86FF')('Claude model'),
+            message: chalk.hex('#3A86FF')('Claude model (Leave blank to use default): '),
             prefix: chalk.hex('#06FFA5')('  🤖'),
-            choices: [
-              { name: chalk.white('Sonnet  ') + chalk.hex('#666666')('│ ') + chalk.gray('Balanced performance'), value: 'sonnet' },
-              { name: chalk.white('Opus    ') + chalk.hex('#666666')('│ ') + chalk.gray('Most capable'), value: 'opus' },
-              { name: chalk.white('Haiku   ') + chalk.hex('#666666')('│ ') + chalk.gray('Fastest response'), value: 'haiku' }
-            ],
-            default: 'sonnet'
+            // choices: [
+            //   { name: chalk.white('Sonnet  ') + chalk.hex('#666666')('│ ') + chalk.gray('Balanced performance'), value: 'sonnet' },
+            //   { name: chalk.white('Opus    ') + chalk.hex('#666666')('│ ') + chalk.gray('Most capable'), value: 'opus' },
+            //   { name: chalk.white('Haiku   ') + chalk.hex('#666666')('│ ') + chalk.gray('Fastest response'), value: 'haiku' }
+            // ],
+            transformer: (input) => chalk.white(input)
           },
           {
             type: 'confirm',
@@ -483,7 +514,7 @@ async function runInteractive() {
         ]);
 
         args.push(answers.specPath);
-        if (answers.model == 'sonnet') args.push('--model', "claude-sonnet-4-5-20250929");
+        if (answers.model) args.push('--model', answers.model);
         if (answers.repairMode) args.push('--repair-mode');
         if (answers.skipRun) args.push('--no-run');
         cleanupKeypressListeners();
@@ -648,36 +679,7 @@ async function runInteractive() {
 
     await executePythonCLI(args, opDetails.name);
 
-    // showSuccess(opDetails.name);
-
-    const { again } = await inquirer.prompt([
-      {
-        type: 'confirm',
-        name: 'again',
-        message: chalk.hex('#06FFA5').bold('Perform another operation'),
-        prefix: chalk.hex('#FFB703')('  🔄'),
-        default: true
-      }
-    ]);
-
-    // Clean up after the final prompt
-    cleanupKeypressListeners();
-    cleanupProcessListeners();
-
-    if (again) {
-      await runInteractive();
-    } else {
-      console.log();
-      const width = 66;
-      console.log('  ' + chalk.hex('#06FFA5')('  ╔' + '═'.repeat(width) + '╗'));
-      console.log('  ' + chalk.hex('#06FFA5')('  ║') + ' '.repeat(width) + chalk.hex('#06FFA5')('║'));
-      console.log('  ' + chalk.hex('#06FFA5')('  ║') + '           ' + chalk.hex('#06FFA5').bold('✨  SESSION COMPLETE  ✨') + ' '.repeat(width - 35) + chalk.hex('#06FFA5')('║'));
-      console.log('  ' + chalk.hex('#06FFA5')('  ║') + ' '.repeat(width) + chalk.hex('#06FFA5')('║'));
-      console.log('  ' + chalk.hex('#06FFA5')('  ║') + '         ' + chalk.gray('All operations finished successfully') + ' '.repeat(width - 45) + chalk.hex('#06FFA5')('║'));
-      console.log('  ' + chalk.hex('#06FFA5')('  ║') + ' '.repeat(width) + chalk.hex('#06FFA5')('║'));
-      console.log('  ' + chalk.hex('#06FFA5')('  ╚' + '═'.repeat(width) + '╝'));
-      console.log();
-    }
+    next_operation()
 
   } catch (error) {
     // Handle ESC key interruption
@@ -693,7 +695,7 @@ async function runInteractive() {
     } else {
       showError('Operation', error);
     }
-    process.exit(1);
+    // process.exit(1);
   }
 }
 
