@@ -559,9 +559,10 @@ async function runInteractive() {
           {
             type: 'input',
             name: 'fixture',
-            message: chalk.hex('#FFB703')('Specific fixture (optional): '),
+            message: chalk.hex('#FFB703')('Fixture name: '),
             prefix: chalk.hex('#06FFA5')('  🎯'),
-            transformer: (input) => input ? chalk.white(input) : chalk.gray('all')
+            validate: (input) => input.length > 0 || 'Fixture name is required',
+            transformer: (input) => chalk.white(input)
           },
           {
             type: 'confirm',
