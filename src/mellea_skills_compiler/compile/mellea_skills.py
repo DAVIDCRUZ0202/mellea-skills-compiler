@@ -40,6 +40,71 @@ LOGGER = configure_logger()
 console = Console(log_time=True)
 
 
+def _select_canonical_mellea_dir(skill_dir: Path, package_name: str) -> list[Path]:
+    """Return the canonical *_mellea directory list under ``skill_dir``.
+
+    Filters ``skill_dir`` for entries ending in ``_mellea`` and resolves which
+    one is the wrapper-canonical compiled package per the wrapper-derived
+    ``package_name``. The LLM is now told the package name verbatim via
+    ``build_system_prompt`` (see ``compile/claude_directives.py``), so under
+    normal operation exactly one matching directory exists. The cases below
+    are defensive — historical compiles produced stray sibling ``*_mellea``
+    directories from LLM name-derivation drift on long hyphenated frontmatter
+    names. Selecting by name rather than blind ``[0]`` avoids the wrapper
+    rendering/validating a stray sibling on filesystem-ordering coincidence.
+
+    Returns:
+        A single-element list containing the canonical directory (suitable
+        for the existing ``mellea_dirs[0]`` consumers), or an empty list if
+        no ``*_mellea`` directory was produced (caller raises in that case).
+
+    Raises:
+        Exception: if more than one ``*_mellea`` directory exists and none
+            match ``package_name``. Cleaning up the stray sibling and
+            re-running is required.
+    """
+    mellea_dirs = [
+        d
+        for d in skill_dir.iterdir()
+        if d.is_dir() and d.name.endswith("_mellea")
+    ]
+    if len(mellea_dirs) > 1:
+        canonical = [d for d in mellea_dirs if d.name == package_name]
+        stray = [d for d in mellea_dirs if d.name != package_name]
+        if canonical:
+            LOGGER.warning(
+                "Found %d *_mellea directories in %s; expected only one. "
+                "Selecting canonical %r; stray sibling(s) %s likely "
+                "originate from LLM name-derivation drift on long "
+                "frontmatter names (Rule OUT-2). Clean them up after "
+                "the compile completes.",
+                len(mellea_dirs),
+                skill_dir,
+                canonical[0].name,
+                [d.name for d in stray],
+            )
+            return canonical
+        raise Exception(
+            f"Found {len(mellea_dirs)} *_mellea directories in "
+            f"{skill_dir}, none matching the wrapper-derived "
+            f"package name {package_name!r}: "
+            f"{[d.name for d in mellea_dirs]}. Remove stray "
+            f"directories and re-run."
+        )
+    if len(mellea_dirs) == 1 and mellea_dirs[0].name != package_name:
+        LOGGER.warning(
+            "Compiled package directory %r does not match the "
+            "wrapper-derived package name %r — the LLM produced a "
+            "different name. Proceeding with the LLM's directory, but "
+            "downstream tooling that expects the canonical name may "
+            "fail. Re-emit with the corrected name or rename the "
+            "directory if this affects export.",
+            mellea_dirs[0].name,
+            package_name,
+        )
+    return mellea_dirs
+
+
 def _get_spec_md_path(spec_path: Path):
     spec_file_path = None
     if spec_path.is_dir():
@@ -294,7 +359,7 @@ def compile(
             exc,
         )
     system_prompt = build_system_prompt(
-        chosen_backend, chosen_model_id, defaults_source
+        chosen_backend, chosen_model_id, defaults_source, package_name
     )
 
     # Write the per-invocation Claude Code settings file with deny rules for
@@ -418,11 +483,7 @@ def compile(
         # copy spec file into the compiled directory (name may differ from frontmatter
         # because melleafy normalises hyphens → underscores per Rule OUT-2)
         skill_dir = spec_path if spec_path.is_dir() else spec_path.parent
-        mellea_dirs = [
-            d
-            for d in skill_dir.iterdir()
-            if d.is_dir() and d.name.endswith("_mellea")
-        ]
+        mellea_dirs = _select_canonical_mellea_dir(skill_dir, package_name)
         if mellea_dirs:
             # Wrapper-side writer invocation (migration phase: WARN only).
             # Reads intermediate/<artifact>_emission.json, runs the deterministic
