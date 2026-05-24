@@ -2,10 +2,9 @@
   "name": "mellea-skills-cli",
   "version": "0.1.0",
   "description": "Node.js wrapper for Mellea Skills Compiler CLI",
-  "main": "index.js",
   "type": "module",
   "scripts": {
-    "interactive": "node interactive-cli.js"
+    "interactive": "node ui/interactive-cli.js"
   },
   "keywords": [
     "mellea",

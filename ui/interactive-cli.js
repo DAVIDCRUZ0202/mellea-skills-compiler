@@ -204,7 +204,7 @@ function executePythonCLI(args, operationName) {
 
     const pythonProcess = spawn('mellea-skills', args, {
       stdio: ['inherit', 'pipe', 'pipe'],
-      shell: true
+      shell: false
     });
 
     let outputShown = false;
@@ -534,7 +534,7 @@ async function runInteractive() {
           {
             type: 'confirm',
             name: 'allFixtures',
-            message: chalk.hex('#06FFA5')('Run all fixtures: '),
+            message: chalk.hex('#3A86FF')('Run all fixtures: '),
             prefix: chalk.hex('#06FFA5')('  📋'),
             default: false
           }
@@ -559,7 +559,7 @@ async function runInteractive() {
           {
             type: 'input',
             name: 'fixture',
-            message: chalk.hex('#FFB703')('Fixture name: '),
+            message: chalk.hex('#3A86FF')('Fixture name: '),
             prefix: chalk.hex('#06FFA5')('  🎯'),
             validate: (input) => input.length > 0 || 'Fixture name is required',
             transformer: (input) => chalk.white(input)
@@ -567,7 +567,7 @@ async function runInteractive() {
           {
             type: 'confirm',
             name: 'enforce',
-            message: chalk.hex('#FFB703')('Enable enforce mode: '),
+            message: chalk.hex('#3A86FF')('Enable enforce mode: '),
             prefix: chalk.hex('#06FFA5')('  🛡️'),
             default: false
           }
@@ -585,7 +585,7 @@ async function runInteractive() {
           {
             type: 'input',
             name: 'specPath',
-            message: chalk.hex('#8338EC')('Path to agent specification (.md): '),
+            message: chalk.hex('#06FFA5')('Path to agent specification (.md): '),
             prefix: chalk.hex('#06FFA5')('  📄'),
             validate: (input) => input.length > 0 || 'Path is required',
             transformer: (input) => chalk.white(input)
@@ -593,7 +593,7 @@ async function runInteractive() {
           {
             type: 'confirm',
             name: 'dryRun',
-            message: chalk.hex('#8338EC')('Dry run (preview only): '),
+            message: chalk.hex('#3A86FF')('Dry run (preview only): '),
             prefix: chalk.hex('#06FFA5')('  👁️'),
             default: false
           }
@@ -619,7 +619,7 @@ async function runInteractive() {
           {
             type: 'confirm',
             name: 'enforce',
-            message: chalk.hex('#FFB703')('Enable enforce mode: '),
+            message: chalk.hex('#3A86FF')('Enable enforce mode: '),
             prefix: chalk.hex('#06FFA5')('  🛡️'),
             default: false
           }
@@ -649,7 +649,7 @@ async function runInteractive() {
           {
             type: 'list',
             name: 'target',
-            message: chalk.hex('#06FFA5')('Deployment target: '),
+            message: chalk.hex('#3A86FF')('Deployment target: '),
             prefix: chalk.hex('#06FFA5')('  🎯'),
             choices: [
               { name: chalk.white('LangGraph   ') + chalk.hex('#666666')('│ ') + chalk.gray('LangGraph deployment'), value: 'langgraph' },
@@ -660,7 +660,7 @@ async function runInteractive() {
           {
             type: 'confirm',
             name: 'force',
-            message: chalk.hex('#06FFA5')('Overwrite if exists'),
+            message: chalk.hex('#3A86FF')('Overwrite if exists: '),
             prefix: chalk.hex('#06FFA5')('  💥'),
             default: false
           }
