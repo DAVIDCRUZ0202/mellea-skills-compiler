@@ -10,6 +10,7 @@ import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import readline from 'readline';
 import { readFileSync } from 'fs';
+import Anthropic from '@anthropic-ai/sdk';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -245,6 +246,56 @@ function executePythonCLI(args, operationName) {
   });
 }
 
+// Fetch available Claude models dynamically using Anthropic SDK
+async function getAvailableClaudeModels() {
+  const spinner = ora({
+    text: chalk.hex('#3A86FF')('  Fetching available Claude models...'),
+    spinner: { interval: 80, frames: ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'] },
+    color: 'cyan'
+  }).start();
+
+  try {
+    const client = new Anthropic();
+    const modelsList = await client.models.list();
+    const models = modelsList.data.map(model => model.id);
+
+    // Map model IDs to display names with descriptions
+    const mappedModels = models.map(modelId => {
+      let displayName = modelId;
+      let description = '';
+
+      // Parse model ID and create friendly display
+      displayName = modelId;
+      if (modelId.includes('opus')) {
+        description = 'Most capable';
+      } else if (modelId.includes('sonnet')) {
+        description = 'Balanced performance';
+      } else if (modelId.includes('haiku')) {
+        description = 'Fastest response';
+      }
+
+      return {
+        name: chalk.white(displayName.padEnd(30)) + chalk.hex('#666666')('│ ') + chalk.gray(description),
+        value: modelId,
+        short: displayName
+      };
+    });
+
+    spinner.succeed(chalk.hex('#06FFA5')(`  Found ${models.length} Claude models`));
+    console.log();
+    return mappedModels;
+  } catch (error) {
+    spinner.fail(chalk.hex('#FF006E')('  Failed to fetch Claude models, using fallback'));
+    console.log();
+    // Fallback models
+    return [
+      { name: chalk.white('opus'.padEnd(30)) + chalk.hex('#666666')('│ ') + chalk.gray('Most capable'), value: 'opus', short: 'opus' },
+      { name: chalk.white('sonnet'.padEnd(30)) + chalk.hex('#666666')('│ ') + chalk.gray('Balanced performance'), value: 'sonnet', short: 'sonnet' },
+      { name: chalk.white('haiku'.padEnd(30)) + chalk.hex('#666666')('│ ') + chalk.gray('Fastest response'), value: 'haiku', short: 'haiku' }
+    ];
+  }
+}
+
 // Get operation details
 function getOperationDetails(operation) {
   const details = {
@@ -476,7 +527,8 @@ async function runInteractive() {
 
     switch (operation) {
       case 'compile':
-        answers = await inquirer.prompt([
+        // First, get the spec path
+        const specPathAnswer = await inquirer.prompt([
           {
             type: 'input',
             name: 'specPath',
@@ -484,17 +536,23 @@ async function runInteractive() {
             prefix: chalk.hex('#06FFA5')('  📄'),
             validate: (input) => input.length > 0 || 'Path required',
             transformer: (input) => chalk.white(input)
-          },
+          }
+        ]);
+
+        console.log();
+
+        // Now fetch available models with loading spinner
+        const availableModels = await getAvailableClaudeModels();
+
+        // Continue with remaining prompts
+        const remainingAnswers = await inquirer.prompt([
           {
-            type: 'input',
+            type: 'list',
             name: 'model',
-            message: chalk.hex('#3A86FF')('Claude model (Leave blank to use default): '),
+            message: chalk.hex('#3A86FF')('Select Claude model: '),
             prefix: chalk.hex('#06FFA5')('  🤖'),
-            // choices: [
-            //   { name: chalk.white('Sonnet  ') + chalk.hex('#666666')('│ ') + chalk.gray('Balanced performance'), value: 'sonnet' },
-            //   { name: chalk.white('Opus    ') + chalk.hex('#666666')('│ ') + chalk.gray('Most capable'), value: 'opus' },
-            //   { name: chalk.white('Haiku   ') + chalk.hex('#666666')('│ ') + chalk.gray('Fastest response'), value: 'haiku' }
-            // ],
+            choices: availableModels,
+            loop: false,
             transformer: (input) => chalk.white(input)
           },
           {
@@ -512,6 +570,9 @@ async function runInteractive() {
             default: false
           }
         ]);
+
+        // Combine answers
+        answers = { ...specPathAnswer, ...remainingAnswers };
 
         args.push(answers.specPath);
         if (answers.model) args.push('--model', answers.model);
