@@ -254,10 +254,24 @@ async function getAvailableClaudeModels() {
     color: 'cyan'
   }).start();
 
+  // Fallback models helper
+  const getFallbackModels = () => [
+    { name: chalk.white('opus'.padEnd(30)) + chalk.hex('#666666')('│ ') + chalk.gray('Most capable'), value: 'opus', short: 'opus' },
+    { name: chalk.white('sonnet'.padEnd(30)) + chalk.hex('#666666')('│ ') + chalk.gray('Balanced performance'), value: 'sonnet', short: 'sonnet' },
+    { name: chalk.white('haiku'.padEnd(30)) + chalk.hex('#666666')('│ ') + chalk.gray('Fastest response'), value: 'haiku', short: 'haiku' }
+  ];
+
   try {
     const client = new Anthropic();
     const modelsList = await client.models.list();
     const models = modelsList.data.map(model => model.id);
+
+    // Check if models list is empty
+    if (!models || models.length === 0) {
+      spinner.warn(chalk.hex('#F59E0B')('  No models found, using fallback'));
+      console.log();
+      return getFallbackModels();
+    }
 
     // Map model IDs to display names with descriptions
     const mappedModels = models.map(modelId => {
@@ -287,12 +301,7 @@ async function getAvailableClaudeModels() {
   } catch (error) {
     spinner.fail(chalk.hex('#FF006E')('  Failed to fetch Claude models, using fallback'));
     console.log();
-    // Fallback models
-    return [
-      { name: chalk.white('opus'.padEnd(30)) + chalk.hex('#666666')('│ ') + chalk.gray('Most capable'), value: 'opus', short: 'opus' },
-      { name: chalk.white('sonnet'.padEnd(30)) + chalk.hex('#666666')('│ ') + chalk.gray('Balanced performance'), value: 'sonnet', short: 'sonnet' },
-      { name: chalk.white('haiku'.padEnd(30)) + chalk.hex('#666666')('│ ') + chalk.gray('Fastest response'), value: 'haiku', short: 'haiku' }
-    ];
+    return getFallbackModels();
   }
 }
 
