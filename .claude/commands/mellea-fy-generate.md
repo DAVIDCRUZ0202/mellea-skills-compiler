@@ -82,7 +82,7 @@ _JSON the model emits:_
     },
     {
       "name": "MODEL_ID",
-      "value": "granite3.3:8b",
+      "value": "granite4.1:3b",
       "type": "str",
       "category": "C8"
     },
@@ -106,7 +106,7 @@ PREFIX_TEXT: Final[str] = """You are an AI assistant.\nYou help users with resea
 
 # === C8: Runtime Environment ===
 BACKEND: Final[str] = 'ollama'
-MODEL_ID: Final[str] = 'granite3.3:8b'
+MODEL_ID: Final[str] = 'granite4.1:3b'
 
 LOOP_BUDGET: Final[int] = 3
 ```
