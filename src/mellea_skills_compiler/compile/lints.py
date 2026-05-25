@@ -400,6 +400,90 @@ def lint_runtime_defaults_bound(package_dir: Path) -> LintResult:
     return result
 
 
+# ─── Lint: session-method-arity ───
+#
+# Required-positional checks for MelleaSession.{instruct,chat,transform,query}.
+# Signatures pinned against Mellea 0.6.0 (verified via inspect.signature in
+# mellea.stdlib.session.MelleaSession). Revisit on Mellea version bump.
+
+_SESSION_METHOD_REQUIRED_PARAMS: dict = {
+    "instruct": ("description",),
+    "chat": ("content",),
+    "transform": ("obj", "transformation"),
+    "query": ("obj", "query"),
+}
+
+_SESSION_METHOD_LINT_SKIP_PARTS = frozenset({"__pycache__", "intermediate", "fixtures"})
+
+
+def lint_session_method_arity(package_dir: Path) -> LintResult:
+    """MelleaSession method calls must supply required positional arguments.
+
+    Catches the common emission bug where an LLM-generated pipeline calls
+    ``m.instruct(grounding_context=..., format=..., ...)`` with NO description
+    string, raising ``TypeError: MelleaSession.instruct() missing 1 required
+    positional argument: 'description'`` at runtime. Symmetric checks apply
+    to ``chat`` (``content``), ``transform`` (``obj``, ``transformation``),
+    and ``query`` (``obj``, ``query``).
+
+    Detection is method-name based: any ``<expr>.{instruct,chat,transform,
+    query}(...)`` call is checked, regardless of whether ``<expr>`` is
+    statically resolvable to a ``MelleaSession``. The false-positive risk is
+    minimal because these method names are uncommon outside the Mellea API.
+    """
+    result = LintResult(lint_id="session-method-arity", verdict="pass")
+
+    py_files: List[Path] = []
+    for p in sorted(package_dir.rglob("*.py")):
+        if any(part in _SESSION_METHOD_LINT_SKIP_PARTS for part in p.parts):
+            continue
+        py_files.append(p)
+    result.files_checked = len(py_files)
+
+    for py_file in py_files:
+        rel = py_file.relative_to(package_dir).as_posix()
+        try:
+            tree = ast.parse(py_file.read_text(), filename=str(py_file))
+        except SyntaxError:
+            continue
+
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            if not isinstance(node.func, ast.Attribute):
+                continue
+            method_name = node.func.attr
+            if method_name not in _SESSION_METHOD_REQUIRED_PARAMS:
+                continue
+
+            required = _SESSION_METHOD_REQUIRED_PARAMS[method_name]
+            n_positional = len(node.args)
+            positional_filled = set(required[:n_positional])
+            kw_filled = {kw.arg for kw in node.keywords if kw.arg is not None}
+            missing = [p for p in required if p not in positional_filled and p not in kw_filled]
+            if missing:
+                missing_str = ", ".join(f"`{m}`" for m in missing)
+                result.failures.append(
+                    LintFailure(
+                        file=rel,
+                        line=getattr(node, "lineno", None),
+                        column=getattr(node, "col_offset", None),
+                        message=(
+                            f"`.{method_name}(...)` missing required "
+                            f"argument(s): {missing_str}. Pass them "
+                            f"positionally or via keyword name. See "
+                            f"MelleaSession.{method_name} in "
+                            f"mellea.stdlib.session."
+                        ),
+                        rule_ref="session-method-arity",
+                    )
+                )
+
+    if result.failures:
+        result.verdict = "fail"
+    return result
+
+
 # ─── Runner ───
 
 
@@ -407,6 +491,7 @@ ALL_LINTS: Tuple[Callable[[Path], LintResult], ...] = (
     lint_fixtures_loader_contract,
     lint_bundled_asset_path_resolution,
     lint_runtime_defaults_bound,
+    lint_session_method_arity,
 )
 
 
