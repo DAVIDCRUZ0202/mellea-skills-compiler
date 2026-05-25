@@ -417,20 +417,7 @@ _SESSION_METHOD_LINT_SKIP_PARTS = frozenset({"__pycache__", "intermediate", "fix
 
 
 def lint_session_method_arity(package_dir: Path) -> LintResult:
-    """MelleaSession method calls must supply required positional arguments.
-
-    Catches the common emission bug where an LLM-generated pipeline calls
-    ``m.instruct(grounding_context=..., format=..., ...)`` with NO description
-    string, raising ``TypeError: MelleaSession.instruct() missing 1 required
-    positional argument: 'description'`` at runtime. Symmetric checks apply
-    to ``chat`` (``content``), ``transform`` (``obj``, ``transformation``),
-    and ``query`` (``obj``, ``query``).
-
-    Detection is method-name based: any ``<expr>.{instruct,chat,transform,
-    query}(...)`` call is checked, regardless of whether ``<expr>`` is
-    statically resolvable to a ``MelleaSession``. The false-positive risk is
-    minimal because these method names are uncommon outside the Mellea API.
-    """
+    """MelleaSession method calls must supply required positional arguments."""
     result = LintResult(lint_id="session-method-arity", verdict="pass")
 
     py_files: List[Path] = []
@@ -484,6 +471,76 @@ def lint_session_method_arity(package_dir: Path) -> LintResult:
     return result
 
 
+# ─── Lint: validation-fn-not-called-directly ───
+#
+# Mellea's ``Requirement.validation_fn`` is internal sampling-loop plumbing.
+# User-emitted code should never call ``<req>.validation_fn(...)`` directly:
+# doing so triggers ``AttributeError: 'dict' object has no attribute
+# 'last_output'`` at the ``simple_validate(...)`` wrapper. Use
+# ``req.validate(backend, ctx, ...)`` for output validation, or plain Python
+# ``if/raise ValueError(...)`` for input preconditions.
+
+_VALIDATION_FN_LINT_SKIP_PARTS = frozenset(
+    {"__pycache__", "intermediate", "fixtures"}
+)
+
+
+def lint_validation_fn_not_called_directly(package_dir: Path) -> LintResult:
+    """Reject any direct call to ``<req>.validation_fn(...)`` in generated code."""
+    result = LintResult(lint_id="validation-fn-not-called-directly", verdict="pass")
+
+    py_files: List[Path] = []
+    for p in sorted(package_dir.rglob("*.py")):
+        if any(part in _VALIDATION_FN_LINT_SKIP_PARTS for part in p.parts):
+            continue
+        py_files.append(p)
+    result.files_checked = len(py_files)
+
+    for py_file in py_files:
+        rel = py_file.relative_to(package_dir).as_posix()
+        try:
+            tree = ast.parse(py_file.read_text(), filename=str(py_file))
+        except SyntaxError:
+            continue
+
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            if not isinstance(node.func, ast.Attribute):
+                continue
+            if node.func.attr != "validation_fn":
+                continue
+            try:
+                rendered = ast.unparse(node)
+            except Exception:  # pragma: no cover — defensive
+                rendered = "<call>"
+            result.failures.append(
+                LintFailure(
+                    file=rel,
+                    line=getattr(node, "lineno", None),
+                    column=getattr(node, "col_offset", None),
+                    message=(
+                        f"`{rendered}` — direct call to `.validation_fn` is "
+                        f"not the public Mellea API. `Requirement.validation_fn` "
+                        f"is internal sampling-loop plumbing; invoking it "
+                        f"directly typically raises AttributeError at runtime "
+                        f"(the `simple_validate(...)` wrapper calls "
+                        f"`ctx.last_output()` on its argument). For "
+                        f"output validation use `req.validate(backend, ctx, ...)` "
+                        f"or attach the Requirement to a sampling strategy. "
+                        f"For input-argument preconditions use plain Python "
+                        f"`if/raise ValueError(...)` — Requirement is for "
+                        f"model-output validation, not input precondition checks."
+                    ),
+                    rule_ref="validation-fn-not-called-directly",
+                )
+            )
+
+    if result.failures:
+        result.verdict = "fail"
+    return result
+
+
 # ─── Runner ───
 
 
@@ -492,6 +549,7 @@ ALL_LINTS: Tuple[Callable[[Path], LintResult], ...] = (
     lint_bundled_asset_path_resolution,
     lint_runtime_defaults_bound,
     lint_session_method_arity,
+    lint_validation_fn_not_called_directly,
 )
 
 

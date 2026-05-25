@@ -20,6 +20,7 @@ from mellea_skills_compiler.compile.lints import (
     lint_fixtures_loader_contract,
     lint_runtime_defaults_bound,
     lint_session_method_arity,
+    lint_validation_fn_not_called_directly,
     run_lints,
 )
 
@@ -568,11 +569,7 @@ class TestSessionMethodArity:
     """Test cases for lint_session_method_arity."""
 
     def test_instruct_missing_description_fails(self):
-        """m.instruct(grounding_context=..., format=...) with no description fails.
-
-        Reproduces the ai-governance-reviewer compile failure: keyword-only
-        args supplied, required positional `description` omitted.
-        """
+        """m.instruct(grounding_context=..., format=...) with no description fails."""
         content = (
             "def run():\n"
             "    m.instruct(\n"
@@ -592,35 +589,24 @@ class TestSessionMethodArity:
             assert result.failures[0].file == "pipeline.py"
 
     def test_instruct_positional_description_passes(self):
-        """m.instruct('describe the task', format=...) passes — description is positional."""
         content = (
             "def run():\n"
             "    m.instruct('describe the task', format=SomeSchema)\n"
         )
         with tempfile.TemporaryDirectory() as tmp:
             pkg = _make_package(Path(tmp), {"pipeline.py": content})
-            result = lint_session_method_arity(pkg)
-            assert result.verdict == "pass", (
-                f"Expected pass for positional description, got {result.verdict}: "
-                f"{[f.message for f in result.failures]}"
-            )
+            assert lint_session_method_arity(pkg).verdict == "pass"
 
     def test_instruct_keyword_description_passes(self):
-        """m.instruct(description='...', format=...) passes — description as kwarg."""
         content = (
             "def run():\n"
             "    m.instruct(description='task', format=SomeSchema)\n"
         )
         with tempfile.TemporaryDirectory() as tmp:
             pkg = _make_package(Path(tmp), {"pipeline.py": content})
-            result = lint_session_method_arity(pkg)
-            assert result.verdict == "pass", (
-                f"Expected pass for keyword description, got {result.verdict}: "
-                f"{[f.message for f in result.failures]}"
-            )
+            assert lint_session_method_arity(pkg).verdict == "pass"
 
     def test_chat_missing_content_fails(self):
-        """m.chat() with no content fails."""
         content = "def run():\n    m.chat(format=Schema)\n"
         with tempfile.TemporaryDirectory() as tmp:
             pkg = _make_package(Path(tmp), {"pipeline.py": content})
@@ -629,7 +615,6 @@ class TestSessionMethodArity:
             assert "content" in result.failures[0].message
 
     def test_transform_requires_two_positionals(self):
-        """m.transform(obj) is missing `transformation`; m.transform(obj, 'X') passes."""
         bad = "def run():\n    m.transform(my_obj)\n"
         good = "def run():\n    m.transform(my_obj, 'shorten the text')\n"
         with tempfile.TemporaryDirectory() as tmp:
@@ -637,14 +622,12 @@ class TestSessionMethodArity:
             result = lint_session_method_arity(pkg_bad)
             assert result.verdict == "fail"
             assert "transformation" in result.failures[0].message
-            assert "obj" not in result.failures[0].message  # obj IS filled
+            assert "obj" not in result.failures[0].message
 
             pkg_good = _make_package(Path(tmp) / "good", {"pipeline.py": good})
-            result = lint_session_method_arity(pkg_good)
-            assert result.verdict == "pass"
+            assert lint_session_method_arity(pkg_good).verdict == "pass"
 
     def test_query_requires_obj_and_query(self):
-        """m.query() passes only when both `obj` and `query` are filled."""
         good_kw = "def run():\n    m.query(obj=x, query='what is this?')\n"
         bad = "def run():\n    m.query(format=S)\n"
         with tempfile.TemporaryDirectory() as tmp:
@@ -656,10 +639,9 @@ class TestSessionMethodArity:
             assert "obj" in r.failures[0].message and "query" in r.failures[0].message
 
     def test_non_session_method_call_skipped(self):
-        """Calls to methods of other names (e.g., .split, .append) are ignored."""
         content = (
             "def run():\n"
-            "    x = 'hi'.split()  # method call but not a session method\n"
+            "    x = 'hi'.split()\n"
             "    lst.append(1)\n"
         )
         with tempfile.TemporaryDirectory() as tmp:
@@ -669,26 +651,21 @@ class TestSessionMethodArity:
             assert result.failures == []
 
     def test_skips_pycache_intermediate_fixtures(self):
-        """Files under __pycache__, intermediate/, and fixtures/ are not checked."""
         bad_call = "def x():\n    m.instruct(format=S)\n"
         with tempfile.TemporaryDirectory() as tmp:
             pkg = _make_package(
                 Path(tmp),
                 {
-                    "intermediate/_old.py": bad_call,  # should be skipped
-                    "fixtures/some_fixture.py": bad_call,  # should be skipped
-                    "__pycache__/cached.py": bad_call,  # should be skipped
+                    "intermediate/_old.py": bad_call,
+                    "fixtures/some_fixture.py": bad_call,
+                    "__pycache__/cached.py": bad_call,
                     "pipeline.py": "def y():\n    m.instruct('valid', format=S)\n",
                 },
             )
             result = lint_session_method_arity(pkg)
-            assert result.verdict == "pass", (
-                f"Skipped paths should not produce failures; got "
-                f"{[f.file for f in result.failures]}"
-            )
+            assert result.verdict == "pass"
 
     def test_both_calls_in_one_file_report_both(self):
-        """Two broken m.instruct() calls in the same file should produce two failures."""
         content = (
             "def f():\n"
             "    m.instruct(grounding_context='a', format=S)\n"
@@ -698,18 +675,114 @@ class TestSessionMethodArity:
             pkg = _make_package(Path(tmp), {"pipeline.py": content})
             result = lint_session_method_arity(pkg)
             assert result.verdict == "fail"
-            assert len(result.failures) == 2, (
-                f"Expected 2 failures, got {len(result.failures)}: "
-                f"{[f.message for f in result.failures]}"
-            )
+            assert len(result.failures) == 2
 
     def test_syntax_error_file_is_skipped_silently(self):
-        """A file that fails to parse is skipped, not raised."""
-        content = "def broken(:\n    pass\n"  # syntax error
+        content = "def broken(:\n    pass\n"
         with tempfile.TemporaryDirectory() as tmp:
             pkg = _make_package(Path(tmp), {"pipeline.py": content})
             result = lint_session_method_arity(pkg)
-            # Either pass (no detectable failure) or skip — but no exception
-            assert result.verdict in ("pass", "skipped"), (
-                f"Syntax-error file should not raise; got verdict={result.verdict}"
+            assert result.verdict in ("pass", "skipped")
+
+
+# ─── TestValidationFnNotCalledDirectly ───
+
+
+class TestValidationFnNotCalledDirectly:
+    """Test cases for lint_validation_fn_not_called_directly."""
+
+    def test_direct_call_on_req_attribute_fails(self):
+        content = (
+            "def check():\n"
+            "    result = req.validation_fn(ctx)\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(Path(tmp), {"pipeline.py": content})
+            result = lint_validation_fn_not_called_directly(pkg)
+            assert result.verdict == "fail"
+            assert len(result.failures) == 1
+            assert "validation_fn" in result.failures[0].message
+
+    def test_attribute_access_no_call_passes(self):
+        content = (
+            "def check():\n"
+            "    if req.validation_fn is not None:\n"
+            "        pass\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(Path(tmp), {"pipeline.py": content})
+            assert lint_validation_fn_not_called_directly(pkg).verdict == "pass"
+
+    def test_bare_name_call_passes(self):
+        content = (
+            "def check():\n"
+            "    validation_fn = lambda s: True\n"
+            "    validation_fn('hi')\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(Path(tmp), {"pipeline.py": content})
+            assert lint_validation_fn_not_called_directly(pkg).verdict == "pass"
+
+    def test_req_validate_passes(self):
+        content = (
+            "async def check():\n"
+            "    result = await req.validate(backend, ctx)\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(Path(tmp), {"pipeline.py": content})
+            assert lint_validation_fn_not_called_directly(pkg).verdict == "pass"
+
+    def test_other_method_calls_not_flagged(self):
+        content = (
+            "def check():\n"
+            "    x.some_other_method('a')\n"
+            "    y.append(1)\n"
+            "    z.run(ctx)\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(Path(tmp), {"pipeline.py": content})
+            assert lint_validation_fn_not_called_directly(pkg).verdict == "pass"
+
+    def test_multiple_failures_in_one_file_all_reported(self):
+        content = (
+            "def check():\n"
+            "    r1 = req_a.validation_fn(arg_a)\n"
+            "    r2 = req_b.validation_fn(arg_b)\n"
+            "    r3 = some.req_c.validation_fn(arg_c)\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(Path(tmp), {"pipeline.py": content})
+            result = lint_validation_fn_not_called_directly(pkg)
+            assert result.verdict == "fail"
+            assert len(result.failures) == 3
+
+    def test_skips_pycache_intermediate_fixtures(self):
+        bad = "def x():\n    req.validation_fn(arg)\n"
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(
+                Path(tmp),
+                {
+                    "intermediate/_x.py": bad,
+                    "fixtures/some.py": bad,
+                    "__pycache__/cached.py": bad,
+                    "pipeline.py": "def y():\n    pass\n",
+                },
             )
+            assert lint_validation_fn_not_called_directly(pkg).verdict == "pass"
+
+    def test_syntax_error_file_silently_skipped(self):
+        content = "def broken(:\n    pass\n"
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(Path(tmp), {"pipeline.py": content})
+            result = lint_validation_fn_not_called_directly(pkg)
+            assert result.verdict in ("pass", "skipped")
+
+    def test_failure_message_guides_to_correct_idiom(self):
+        content = "def x():\n    req.validation_fn(ctx)\n"
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(Path(tmp), {"pipeline.py": content})
+            result = lint_validation_fn_not_called_directly(pkg)
+            assert result.verdict == "fail"
+            msg = result.failures[0].message
+            assert "req.validate" in msg
+            assert "ValueError" in msg
