@@ -134,9 +134,17 @@ For Risk Assessment
 ollama pull ibm/granite3.3-guardian:8b
 ```
 
-### Compile a skill specification
+### Node.js Interactive CLI
 
-#### Option 1: compile skill with CLI (Recommended)
+Begin operation by using the Mellea Skills Compiler Node.js Interactive CLI or skip to the next step to use command-based CLI.
+
+```
+./mellea-skills-ui.sh
+```
+
+### Command-based CLI
+
+### Compile Agent Skill - Option 1 (Recommended)
 
 Compile a skill into a typed Mellea pipeline via the CLI:
 
@@ -158,7 +166,7 @@ Melleafy Repair: Identify and correct any errors effectively in Mellea skill com
 mellea-skills compile --repair-mode <Your-local-path>/skills/weather --model aws/claude-opus-4-5
 ```
 
-#### Option 2: compile skill with Claude code
+### Compile Agent Skill - Option 2 (Using Claude Code)
 
 Run `/mellea-fy` directly inside Claude Code:
 
