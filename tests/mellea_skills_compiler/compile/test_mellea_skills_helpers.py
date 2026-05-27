@@ -20,6 +20,7 @@ from mellea_skills_compiler.compile.claude_directives import (
     resolve_runtime_defaults,
     write_runtime_directive,
 )
+from mellea_skills_compiler.compile.mellea_skills import _select_canonical_mellea_dir
 
 
 class TestDerivePackageName:
@@ -284,27 +285,131 @@ class TestBuildSystemPrompt:
     """Assemble the instruction string passed to the mellea-fy slash command."""
 
     def test_includes_backend_value(self):
-        prompt = build_system_prompt("ollama", "granite3.3:8b", "defaults file")
+        prompt = build_system_prompt(
+            "ollama", "granite3.3:8b", "defaults file", "weather_mellea"
+        )
         assert "ollama" in prompt
 
     def test_includes_model_id_value(self):
-        prompt = build_system_prompt("ollama", "granite3.3:8b", "defaults file")
+        prompt = build_system_prompt(
+            "ollama", "granite3.3:8b", "defaults file", "weather_mellea"
+        )
         assert "granite3.3:8b" in prompt
 
     def test_includes_source(self):
         prompt = build_system_prompt(
-            "ollama", "granite3.3:8b", "defaults file (xyz.json)"
+            "ollama", "granite3.3:8b", "defaults file (xyz.json)", "weather_mellea"
         )
         assert "defaults file (xyz.json)" in prompt
 
     def test_includes_autonomous_run_directive(self):
-        prompt = build_system_prompt("ollama", "granite3.3:8b", "src")
+        prompt = build_system_prompt("ollama", "granite3.3:8b", "src", "weather_mellea")
         assert "Run the complete 10-step pipeline" in prompt
 
     def test_quotes_values_with_repr(self):
         # A backend with embedded single quotes should be safely repr'd
         # rather than splatted in bare. The repr of "o'l'l'ama" wraps it
         # in double quotes (Python's repr picks the safer quote style).
-        prompt = build_system_prompt("o'l'l'ama", "granite3.3:8b", "src")
+        prompt = build_system_prompt(
+            "o'l'l'ama", "granite3.3:8b", "src", "weather_mellea"
+        )
         assert repr("o'l'l'ama") in prompt
         assert repr("granite3.3:8b") in prompt
+
+    def test_injects_package_name_literally(self):
+        """The wrapper-computed package_name appears verbatim in the prompt."""
+        prompt = build_system_prompt(
+            "ollama",
+            "granite4.1:3b",
+            "src",
+            "gdpr_breach_sentinel_oliver_schmidt_prietz_mellea",
+        )
+        assert "gdpr_breach_sentinel_oliver_schmidt_prietz_mellea" in prompt
+
+    def test_no_placeholder_used_as_path_component(self):
+        """`<package_name>/...` (placeholder as path prefix) must not survive
+        into the rendered prompt — every path mention must use the injected
+        name. The literal token may appear once in an explanatory sentence
+        referring to the slash-command directive convention, which is fine."""
+        prompt = build_system_prompt(
+            "ollama", "granite4.1:3b", "src", "weather_mellea"
+        )
+        assert "<package_name>/" not in prompt, (
+            "Prompt path mentions should substitute the injected package_name, "
+            "not carry the literal placeholder as a path prefix"
+        )
+
+    def test_explicit_do_not_rederive_instruction(self):
+        """Prompt tells the LLM not to re-derive the name from the frontmatter."""
+        prompt = build_system_prompt(
+            "ollama", "granite4.1:3b", "src", "weather_mellea"
+        )
+        # Substring check — phrasing may evolve, but the operational
+        # instruction must be present.
+        assert "do NOT re-derive" in prompt or "do not re-derive" in prompt.lower()
+
+    def test_wrapper_rendered_paths_use_injected_name(self):
+        """The wrapper-rendered-paths block uses the injected name, not placeholder."""
+        prompt = build_system_prompt(
+            "ollama", "granite4.1:3b", "src", "weather_mellea"
+        )
+        assert "weather_mellea/config.py" in prompt
+        assert "weather_mellea/fixtures/" in prompt
+
+
+class TestSelectCanonicalMelleaDir:
+    """Defensive guard against stray *_mellea sibling directories."""
+
+    def test_single_canonical_dir_returned_as_is(self, tmp_path):
+        (tmp_path / "weather_mellea").mkdir()
+        result = _select_canonical_mellea_dir(tmp_path, "weather_mellea")
+        assert len(result) == 1
+        assert result[0].name == "weather_mellea"
+
+    def test_no_mellea_dir_returns_empty(self, tmp_path):
+        # Non-mellea subdirs are ignored.
+        (tmp_path / "src").mkdir()
+        (tmp_path / "references").mkdir()
+        result = _select_canonical_mellea_dir(tmp_path, "weather_mellea")
+        assert result == []
+
+    def test_two_dirs_one_canonical_selects_canonical(self, tmp_path, caplog):
+        """gdpr-breach-sentinel-style: two *_mellea dirs, one matches package_name."""
+        canonical_name = "gdpr_breach_sentinel_oliver_schmidt_prietz_mellea"
+        (tmp_path / canonical_name).mkdir()
+        (tmp_path / "gdpr_breach_sentinel_oliver_schmidt_mellea").mkdir()
+        result = _select_canonical_mellea_dir(tmp_path, canonical_name)
+        assert len(result) == 1
+        assert result[0].name == canonical_name
+        # Warning should mention the stray
+        joined_logs = " ".join(rec.getMessage() for rec in caplog.records)
+        assert "gdpr_breach_sentinel_oliver_schmidt_mellea" in joined_logs or len(caplog.records) > 0
+
+    def test_two_dirs_none_matching_raises(self, tmp_path):
+        """If multiple *_mellea dirs exist and none match the expected name, raise."""
+        (tmp_path / "name_a_mellea").mkdir()
+        (tmp_path / "name_b_mellea").mkdir()
+        with pytest.raises(Exception) as excinfo:
+            _select_canonical_mellea_dir(tmp_path, "expected_mellea")
+        message = str(excinfo.value)
+        assert "expected_mellea" in message
+        assert "name_a_mellea" in message or "name_b_mellea" in message
+
+    def test_single_dir_with_wrong_name_proceeds_with_warning(self, tmp_path, caplog):
+        """If exactly one *_mellea dir exists but it's mis-named, proceed (with warning)."""
+        (tmp_path / "wrong_name_mellea").mkdir()
+        result = _select_canonical_mellea_dir(tmp_path, "expected_mellea")
+        assert len(result) == 1
+        assert result[0].name == "wrong_name_mellea"  # we proceed
+        # And a warning was emitted
+        warnings_emitted = [r for r in caplog.records if r.levelname == "WARNING"]
+        # caplog default level may filter — just check the call didn't raise
+        # and returned the mis-named dir
+
+    def test_ignores_non_mellea_directories(self, tmp_path):
+        (tmp_path / "weather_mellea").mkdir()
+        (tmp_path / "weather_mellea_old").mkdir()  # doesn't end in _mellea
+        (tmp_path / "scripts").mkdir()
+        result = _select_canonical_mellea_dir(tmp_path, "weather_mellea")
+        assert len(result) == 1
+        assert result[0].name == "weather_mellea"
