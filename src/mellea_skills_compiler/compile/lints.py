@@ -174,6 +174,56 @@ def _is_skipped_path(rel_path: str) -> bool:
     return parts[0] in ("fixtures", "intermediate") or "__pycache__" in parts
 
 
+def _collect_file_root_aliases(tree: ast.AST) -> set[str]:
+    """Return Name identifiers in `tree` that are bound to a `__file__`-rooted
+    expression by a simple assignment.
+
+    Accepts a Name as a valid `__file__`-rooted alias if it appears anywhere in
+    `tree` as the target of an `Assign` or `AnnAssign` whose value satisfies
+    `_is_file_rooted` — i.e. `Path(__file__).parent`, the bare `__file__` Name,
+    or a `Call` taking `__file__` as an argument.
+
+    Example:
+      ```
+      pkg_dir = Path(__file__).parent       # pkg_dir → alias
+      references_dir = pkg_dir / "references"  # leftmost(pkg_dir) accepted
+      ```
+
+    The scan is file-wide (does not respect function scope). In machine-emitted
+    code, alias shadowing is rare; we trade exactness for a meaningful False-
+    positive reduction on the readable `<var> = Path(__file__).parent`
+    convention.
+    """
+    aliases: set[str] = set()
+    for node in ast.walk(tree):
+        targets: List[ast.expr] = []
+        value: Optional[ast.expr] = None
+        if isinstance(node, ast.Assign):
+            targets = list(node.targets)
+            value = node.value
+        elif isinstance(node, ast.AnnAssign) and node.value is not None:
+            targets = [node.target]
+            value = node.value
+        if value is None or not _is_file_rooted(value):
+            continue
+        for tgt in targets:
+            if isinstance(tgt, ast.Name):
+                aliases.add(tgt.id)
+    return aliases
+
+
+def _leftmost_is_file_rooted(
+    leftmost: ast.AST, aliases: set[str]
+) -> bool:
+    """True if `leftmost` is a `__file__`-rooted expression OR a Name alias
+    bound to one earlier in the file."""
+    if _is_path_dunder_file_parent(leftmost):
+        return True
+    if isinstance(leftmost, ast.Name) and leftmost.id in aliases:
+        return True
+    return False
+
+
 def lint_bundled_asset_path_resolution(package_dir: Path) -> LintResult:
     """Reject any path-join construction that resolves a bundled-asset path
     via anything other than `Path(__file__).parent`."""
@@ -210,6 +260,8 @@ def lint_bundled_asset_path_resolution(package_dir: Path) -> LintResult:
         except SyntaxError:
             continue  # the parseable lint is responsible
 
+        aliases = _collect_file_root_aliases(tree)
+
         for node in ast.walk(tree):
             # Pattern 1: BinOp(Div) chain — Path(...) / "scripts/..."
             if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
@@ -223,7 +275,7 @@ def lint_bundled_asset_path_resolution(package_dir: Path) -> LintResult:
                             bundled_hit = d
                             first_str = r
                             break
-                if bundled_hit is None or _is_path_dunder_file_parent(leftmost):
+                if bundled_hit is None or _leftmost_is_file_rooted(leftmost, aliases):
                     continue
                 _record(
                     rel,
@@ -235,7 +287,9 @@ def lint_bundled_asset_path_resolution(package_dir: Path) -> LintResult:
                         f"`Path(__file__).parent / \"{bundled_hit}/<...>\"` "
                         f"(Rule OUT-6 in mellea-fy.md, Rule 2.5-2 in mellea-fy-deps.md). "
                         f"Common error: `Path(repo_root) / \"{bundled_hit}/...\"` — "
-                        f"must be `Path(__file__).parent / \"{bundled_hit}\" / ...`."
+                        f"must be `Path(__file__).parent / \"{bundled_hit}\" / ...`. "
+                        f"A local alias is fine: "
+                        f"`pkg_dir = Path(__file__).parent` then `pkg_dir / \"{bundled_hit}\"` passes."
                     ),
                 )
 
@@ -259,7 +313,11 @@ def lint_bundled_asset_path_resolution(package_dir: Path) -> LintResult:
                                 bundled_hit = d
                                 first_str = arg
                                 break
-                    if bundled_hit is None or _is_file_rooted(node.args[0]):
+                    base = node.args[0]
+                    base_is_file_rooted = _is_file_rooted(base) or (
+                        isinstance(base, ast.Name) and base.id in aliases
+                    )
+                    if bundled_hit is None or base_is_file_rooted:
                         continue
                     _record(
                         rel,
