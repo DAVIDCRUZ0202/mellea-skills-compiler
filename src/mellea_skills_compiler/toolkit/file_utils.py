@@ -68,11 +68,28 @@ def load_skill_pipeline(pipeline_dir: Path):
         # Remove parent directory from sys.path
         sys.path.pop(0)
 
-    # Find the main entry point (run_* function).
-    # Prefer functions defined directly in pipeline.py over imported ones,
-    # since pipeline.py may import helper run_* functions from other modules
-    # (e.g., run_all_detectors from detectors.py) that aren't the entry point.
+    # Find the main entry point.
+    # Resolution order:
+    #   1. Locally-defined `run_pipeline` — the documented canonical entry
+    #      (`melleafy.json:entry_signature` always names this) and the only
+    #      name guaranteed to be the entry point regardless of any helper
+    #      `run_*` functions that may be defined alongside it.
+    #   2. Any other locally-defined `run_*` function — first match by
+    #      sorted dir() order.
+    #   3. Any imported `run_*` function (functions whose `__module__` is
+    #      not the pipeline module itself).
+    #
+    # The earlier "first locally-defined run_* wins" rule picked the
+    # alphabetically-first match, which silently bound `run_assessment_method`,
+    # `run_analysis`, etc. as the entry whenever the canonical `run_pipeline`
+    # sorted after a helper. The smoke-check would then call the helper with
+    # the fixture's kwargs and raise TypeError on signature mismatch.
     module_name = skill_pipeline.__name__
+
+    canonical = getattr(skill_pipeline, "run_pipeline", None)
+    if callable(canonical) and getattr(canonical, "__module__", None) == module_name:
+        return canonical
+
     run_fn = None
     imported_run_fn = None
     for attr_name in dir(skill_pipeline):
