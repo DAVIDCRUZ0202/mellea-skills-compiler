@@ -1,15 +1,9 @@
 """Step 7 structural lints — Python implementations.
 
-Implements two lints from `.claude/commands/mellea-fy-validate.md`:
-
-  - `bundled-asset-path-resolution` (Rule OUT-6, Rule 2.5-2)
-  - `fixtures-loader-contract` (R16, Rule 4-1)
-
-The other 14 lints documented in `mellea-fy-validate.md` are still applied
-by the LLM during Step 7 of the slash command. These two are implemented in
-Python because they are AST-precise structural checks where LLM application
-has proven unreliable, and they catch the exact drift modes that have caused
-post-compile breakage in shipped skills (see session history).
+AST-precise structural checks where LLM application has proven unreliable
+and the drift modes have caused post-compile breakage in shipped skills.
+The remaining lints documented in `.claude/commands/mellea-fy-validate.md`
+are still applied by the LLM during Step 7 of the slash command.
 """
 
 from __future__ import annotations
@@ -19,10 +13,23 @@ import json
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable, List, Optional, Tuple
+from typing import Any, Callable, List, Optional, Set, Tuple
 
 
 _BUNDLED_DIRS = ("scripts", "references", "assets")
+
+
+def _col_offset_to_schema(node: Any) -> Optional[int]:
+    """Convert an AST node's 0-indexed ``col_offset`` to a 1-indexed column.
+
+    Python's ``ast.AST.col_offset`` is 0-indexed. LSP/IDE conventions and the
+    step_7_report schema treat ``column`` as 1-indexed. Returns ``None`` when
+    the node lacks the attribute.
+    """
+    col = getattr(node, "col_offset", None)
+    if col is None:
+        return None
+    return col + 1
 
 
 @dataclass
@@ -529,6 +536,514 @@ def lint_session_method_arity(package_dir: Path) -> LintResult:
     return result
 
 
+# ─── Shared helpers: m.instruct / start_session pattern detection ───
+#
+# Used by instruct-result-parse-before-access, format-annotation, and
+# session-boundary. The three lints share the same surface (pipeline.py,
+# slots.py, constrained_slots.py) and the same notion of an "m.instruct(...)"
+# call assigned to a Name target.
+
+
+_INSTRUCT_LINT_FILES: Tuple[str, ...] = (
+    "pipeline.py",
+    "slots.py",
+    "constrained_slots.py",
+)
+
+
+def _is_m_instruct_call(node: ast.AST) -> bool:
+    """True iff node is a `Call` whose func is `m.instruct` (Attribute on Name 'm')."""
+    if not isinstance(node, ast.Call):
+        return False
+    func = node.func
+    if not isinstance(func, ast.Attribute) or func.attr != "instruct":
+        return False
+    return isinstance(func.value, ast.Name) and func.value.id == "m"
+
+
+def _instruct_call_has_format_kwarg(node: ast.Call) -> bool:
+    """True iff an `m.instruct(...)` Call has a `format=` keyword."""
+    return any(kw.arg == "format" for kw in node.keywords)
+
+
+def _iter_function_scopes(tree: ast.AST):
+    """Yield every FunctionDef/AsyncFunctionDef + the module-level scope."""
+    yield tree
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            yield node
+
+
+# ─── Lint: instruct-result-parse-before-access (KB1) ───
+#
+# `m.instruct(format=Model)` returns a `ComputedModelOutputThunk`, not a
+# Pydantic model. Direct attribute access on the thunk (`thunk.some_field`)
+# raises AttributeError at runtime. The thunk must be parsed first via
+# `_safe_parse_with_fallback`, `_parse_instruct_result`, or
+# `Model.model_validate_json(thunk.value)`.
+
+
+_THUNK_CONSUMER_FUNC_NAMES: frozenset = frozenset({
+    "_parse_instruct_result",
+    "_safe_parse_with_fallback",
+})
+
+
+def _consumer_thunk_arg_nodes(call: ast.Call, raw_thunks: Set[str]) -> Set[int]:
+    """Return id(arg_node) set for thunk-Name args sitting in the first
+    positional slot of a documented parser call."""
+    fname = (
+        call.func.id if isinstance(call.func, ast.Name)
+        else call.func.attr if isinstance(call.func, ast.Attribute)
+        else None
+    )
+    if fname not in _THUNK_CONSUMER_FUNC_NAMES:
+        return set()
+    if not call.args:
+        return set()
+    first = call.args[0]
+    if isinstance(first, ast.Name) and first.id in raw_thunks:
+        return {id(first)}
+    return set()
+
+
+def _is_model_validate_json_on_thunk_value(
+    call: ast.Call, raw_thunks: Set[str]
+) -> Optional[str]:
+    """If call is `Model.model_validate_json(thunk.value)` for a known thunk,
+    return the thunk's name; otherwise None."""
+    func = call.func
+    if not (
+        isinstance(func, ast.Attribute) and func.attr == "model_validate_json"
+    ):
+        return None
+    if len(call.args) != 1:
+        return None
+    arg = call.args[0]
+    if not (isinstance(arg, ast.Attribute) and arg.attr == "value"):
+        return None
+    inner = arg.value
+    if isinstance(inner, ast.Name) and inner.id in raw_thunks:
+        return inner.id
+    return None
+
+
+def _stmt_assigns_from_consumer(
+    stmt: ast.stmt, raw_thunks: Set[str]
+) -> Optional[Tuple[str, ast.Call]]:
+    """If stmt is `var = consumer(thunk, ...)`, return (var_name, call)."""
+    if not isinstance(stmt, ast.Assign) or len(stmt.targets) != 1:
+        return None
+    target = stmt.targets[0]
+    if not isinstance(target, ast.Name):
+        return None
+    call = stmt.value
+    if not isinstance(call, ast.Call):
+        return None
+    fname = (
+        call.func.id if isinstance(call.func, ast.Name)
+        else call.func.attr if isinstance(call.func, ast.Attribute)
+        else None
+    )
+    if fname not in _THUNK_CONSUMER_FUNC_NAMES:
+        return None
+    if not call.args:
+        return None
+    first = call.args[0]
+    if not (isinstance(first, ast.Name) and first.id in raw_thunks):
+        return None
+    return target.id, call
+
+
+def _scan_scope_for_kb1(
+    scope: ast.AST, rel: str, failures: List[LintFailure]
+) -> None:
+    """Walk one function body statement-by-statement, tracking raw thunks."""
+    raw_thunks: Set[str] = set()
+    body = getattr(scope, "body", [])
+
+    def _process_block(stmts):
+        nonlocal raw_thunks
+        for stmt in stmts:
+            new_thunk_name: Optional[str] = None
+            if (
+                isinstance(stmt, ast.Assign)
+                and len(stmt.targets) == 1
+                and isinstance(stmt.targets[0], ast.Name)
+                and isinstance(stmt.value, ast.Call)
+                and _is_m_instruct_call(stmt.value)
+                and _instruct_call_has_format_kwarg(stmt.value)
+            ):
+                new_thunk_name = stmt.targets[0].id
+
+            consumed = _stmt_assigns_from_consumer(stmt, raw_thunks)
+
+            exempt_node_ids: Set[int] = set()
+            for sub in ast.walk(stmt):
+                if isinstance(sub, ast.Call):
+                    exempt_node_ids |= _consumer_thunk_arg_nodes(sub, raw_thunks)
+                    thunk_in_mvj = _is_model_validate_json_on_thunk_value(
+                        sub, raw_thunks
+                    )
+                    if thunk_in_mvj is not None:
+                        arg = sub.args[0]
+                        exempt_node_ids.add(id(arg))
+                        exempt_node_ids.add(id(arg.value))
+
+            for sub in ast.walk(stmt):
+                if isinstance(sub, ast.Attribute):
+                    base = sub.value
+                    if not (
+                        isinstance(base, ast.Name) and base.id in raw_thunks
+                    ):
+                        continue
+                    if id(sub) in exempt_node_ids:
+                        continue
+                    failures.append(
+                        LintFailure(
+                            file=rel,
+                            line=getattr(sub, "lineno", None),
+                            column=getattr(sub, "col_offset", None),
+                            message=(
+                                f"`{base.id}` is the result of "
+                                f"`m.instruct(..., format=Model)` and is a "
+                                f"`ComputedModelOutputThunk`, NOT a Pydantic "
+                                f"model. Direct attribute access "
+                                f"`{base.id}.{sub.attr}` raises AttributeError"
+                                f" at runtime (KB1). Parse the thunk first: "
+                                f"`parsed = _safe_parse_with_fallback("
+                                f"{base.id}, <Model>, **defaults)` (preferred)"
+                                f", `parsed = _parse_instruct_result("
+                                f"{base.id}, <Model>)`, or `<Model>."
+                                f"model_validate_json({base.id}.value)`."
+                            ),
+                            rule_ref="KB1 (instruct returns thunk)",
+                        )
+                    )
+
+            if consumed is not None:
+                consumed_var, _ = consumed
+                call = stmt.value
+                first_arg = call.args[0]
+                if isinstance(first_arg, ast.Name):
+                    raw_thunks.discard(first_arg.id)
+                raw_thunks.discard(consumed_var)
+            elif new_thunk_name is not None:
+                raw_thunks.add(new_thunk_name)
+            else:
+                if isinstance(stmt, ast.Assign):
+                    for tgt in stmt.targets:
+                        if isinstance(tgt, ast.Name):
+                            raw_thunks.discard(tgt.id)
+
+            for attr in ("body", "orelse", "finalbody"):
+                inner = getattr(stmt, attr, None)
+                if isinstance(inner, list):
+                    _process_block(inner)
+            if isinstance(stmt, ast.Try):
+                for handler in stmt.handlers:
+                    _process_block(handler.body)
+
+    _process_block(body)
+
+
+def lint_instruct_result_parse_before_access(package_dir: Path) -> LintResult:
+    """KB1: `m.instruct(format=Model)` returns a thunk, not a Pydantic model.
+
+    The thunk MUST be parsed before any field access. Exempt patterns:
+      - `_parse_instruct_result(thunk, M)`
+      - `_safe_parse_with_fallback(thunk, M, **defaults)`
+      - `M.model_validate_json(thunk.value)`
+    """
+    result = LintResult(
+        lint_id="instruct-result-parse-before-access", verdict="pass"
+    )
+
+    files_to_check: List[Path] = []
+    for fname in _INSTRUCT_LINT_FILES:
+        p = package_dir / fname
+        if p.exists():
+            files_to_check.append(p)
+    result.files_checked = len(files_to_check)
+
+    for py_file in files_to_check:
+        rel = py_file.relative_to(package_dir).as_posix()
+        try:
+            tree = ast.parse(py_file.read_text(), filename=str(py_file))
+        except SyntaxError:
+            continue
+        for scope in _iter_function_scopes(tree):
+            _scan_scope_for_kb1(scope, rel, result.failures)
+
+    seen: Set[Tuple[str, Optional[int], Optional[int], str]] = set()
+    deduped: List[LintFailure] = []
+    for f in result.failures:
+        key = (f.file, f.line, f.column, f.message[:80])
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(f)
+    result.failures = deduped
+
+    if result.failures:
+        result.verdict = "fail"
+    return result
+
+
+# ─── Lint: format-annotation ───
+#
+# Every `m.instruct(...)` call whose result is later parsed (via
+# `Model.model_validate_json(thunk.value)`, `_parse_instruct_result(thunk, Model)`,
+# or `_safe_parse_with_fallback(thunk, Model, ...)`) MUST carry a `format=`
+# keyword. Without it, the LLM returns free-form JSON-shaped text instead of
+# constrained-decoding output, and the Pydantic parse fails (or worse, silently
+# succeeds on a poorly-shaped JSON object).
+
+
+def lint_format_annotation(package_dir: Path) -> LintResult:
+    """`m.instruct(...)` calls whose result is parsed must include `format=`.
+
+    Detection:
+      1. AST-parse pipeline.py / slots.py / constrained_slots.py.
+      2. For every `Call` that is `m.instruct(...)` assigned to a Name target
+         (`thunk = m.instruct(...)`), record whether it has `format=` and
+         which variable holds the result.
+      3. Walk for subsequent uses of that variable as:
+           - argument to `<Model>.model_validate_json(<thunk>.value)`
+           - first positional arg to `_parse_instruct_result(<thunk>, ...)`
+           - first positional arg to `_safe_parse_with_fallback(<thunk>, ...)`
+      4. If any such parse-use is found AND the original instruct call had
+         no `format=` kwarg → hard failure on the m.instruct call line.
+    """
+    result = LintResult(lint_id="format-annotation", verdict="pass")
+
+    files_to_check: List[Path] = []
+    for fname in _INSTRUCT_LINT_FILES:
+        p = package_dir / fname
+        if p.exists():
+            files_to_check.append(p)
+    result.files_checked = len(files_to_check)
+
+    for py_file in files_to_check:
+        rel = py_file.relative_to(package_dir).as_posix()
+        try:
+            tree = ast.parse(py_file.read_text(), filename=str(py_file))
+        except SyntaxError:
+            continue
+
+        instruct_assignments: dict = {}
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Assign):
+                continue
+            if len(node.targets) != 1:
+                continue
+            target = node.targets[0]
+            if not isinstance(target, ast.Name):
+                continue
+            if not (
+                isinstance(node.value, ast.Call) and _is_m_instruct_call(node.value)
+            ):
+                continue
+            instruct_assignments[target.id] = (
+                _instruct_call_has_format_kwarg(node.value),
+                node.value,
+            )
+
+        if not instruct_assignments:
+            continue
+
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+
+            # Pattern 1: <Model>.model_validate_json(thunk.value)
+            if (
+                isinstance(func, ast.Attribute)
+                and func.attr == "model_validate_json"
+                and len(node.args) == 1
+                and isinstance(node.args[0], ast.Attribute)
+                and node.args[0].attr == "value"
+                and isinstance(node.args[0].value, ast.Name)
+            ):
+                thunk_name = node.args[0].value.id
+                info = instruct_assignments.get(thunk_name)
+                if info and not info[0]:
+                    instruct_call = info[1]
+                    result.failures.append(
+                        LintFailure(
+                            file=rel,
+                            line=getattr(instruct_call, "lineno", None),
+                            column=getattr(instruct_call, "col_offset", None),
+                            message=(
+                                f"m.instruct() result `{thunk_name}` is "
+                                f"parsed via `<Model>.model_validate_json"
+                                f"({thunk_name}.value)` but the m.instruct "
+                                f"call has no `format=` keyword. Without "
+                                f"`format=`, the model returns free-form "
+                                f"text instead of constrained-decoded JSON; "
+                                f"the parse will fail or silently produce "
+                                f"a malformed object. Fix: add "
+                                f"`format=<Model>` to the m.instruct call."
+                            ),
+                            rule_ref="format-annotation",
+                        )
+                    )
+                continue
+
+            # Patterns 2/3: _parse_instruct_result(thunk, ...) or
+            # _safe_parse_with_fallback(thunk, ...)
+            callee = (
+                func.id if isinstance(func, ast.Name)
+                else func.attr if isinstance(func, ast.Attribute)
+                else None
+            )
+            if callee not in (
+                "_parse_instruct_result",
+                "_safe_parse_with_fallback",
+            ):
+                continue
+            if not node.args:
+                continue
+            first = node.args[0]
+            if not isinstance(first, ast.Name):
+                continue
+            info = instruct_assignments.get(first.id)
+            if info and not info[0]:
+                instruct_call = info[1]
+                result.failures.append(
+                    LintFailure(
+                        file=rel,
+                        line=getattr(instruct_call, "lineno", None),
+                        column=getattr(instruct_call, "col_offset", None),
+                        message=(
+                            f"m.instruct() result `{first.id}` is parsed "
+                            f"via `{callee}({first.id}, ...)` but the "
+                            f"m.instruct call has no `format=` keyword. "
+                            f"Without `format=`, the model returns free-"
+                            f"form text and the helper's "
+                            f"`model_validate_json` call inside will fail. "
+                            f"Fix: add `format=<Model>` to the m.instruct "
+                            f"call."
+                        ),
+                        rule_ref="format-annotation",
+                    )
+                )
+
+    seen: Set[Tuple[str, Optional[int]]] = set()
+    deduped: List[LintFailure] = []
+    for f in result.failures:
+        key = (f.file, f.line)
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(f)
+    result.failures = deduped
+
+    if result.failures:
+        result.verdict = "fail"
+    return result
+
+
+# ─── Lint: session-boundary (KB5) ───
+#
+# Mellea schema priming: once a session has generated N objects matching schema
+# A, the next `m.instruct(format=B)` call in the same session keeps producing
+# A-shaped output. The fix is to split the session — open a new
+# `start_session()` block per distinct format type.
+
+
+def _is_start_session_call(node: ast.AST) -> bool:
+    """True iff node is a Call whose callee is the name `start_session`."""
+    if not isinstance(node, ast.Call):
+        return False
+    func = node.func
+    if isinstance(func, ast.Name):
+        return func.id == "start_session"
+    if isinstance(func, ast.Attribute):
+        return func.attr == "start_session"
+    return False
+
+
+def _instruct_format_type_name(node: ast.Call) -> Optional[str]:
+    """If `node` is `<...>.instruct(format=X)`, return X's type name (or None)."""
+    if not (
+        isinstance(node.func, ast.Attribute) and node.func.attr == "instruct"
+    ):
+        return None
+    for kw in node.keywords:
+        if kw.arg != "format":
+            continue
+        if isinstance(kw.value, ast.Name):
+            return kw.value.id
+        if isinstance(kw.value, ast.Attribute):
+            return kw.value.attr
+    return None
+
+
+def lint_session_boundary(package_dir: Path) -> LintResult:
+    """Each `start_session(...)` block must use at most one distinct format type."""
+    result = LintResult(lint_id="session-boundary", verdict="pass")
+
+    files_to_check: List[Path] = []
+    for fname in _INSTRUCT_LINT_FILES:
+        p = package_dir / fname
+        if p.exists():
+            files_to_check.append(p)
+    result.files_checked = len(files_to_check)
+
+    for py_file in files_to_check:
+        rel = py_file.relative_to(package_dir).as_posix()
+        try:
+            tree = ast.parse(py_file.read_text(), filename=str(py_file))
+        except SyntaxError:
+            continue
+
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.With, ast.AsyncWith)):
+                continue
+            is_session = any(
+                _is_start_session_call(item.context_expr) for item in node.items
+            )
+            if not is_session:
+                continue
+
+            format_types: Set[str] = set()
+            for child in ast.walk(node):
+                if not isinstance(child, ast.Call):
+                    continue
+                name = _instruct_format_type_name(child)
+                if name is not None:
+                    format_types.add(name)
+
+            if len(format_types) <= 1:
+                continue
+
+            result.failures.append(
+                LintFailure(
+                    file=rel,
+                    line=getattr(node, "lineno", None),
+                    column=getattr(node, "col_offset", None),
+                    message=(
+                        f"start_session() block uses {len(format_types)} "
+                        f"distinct format types: "
+                        f"{', '.join(sorted(format_types))}. Mellea's schema "
+                        f"priming means the LLM cannot reliably switch "
+                        f"BaseModel schemas mid-session — after N successful "
+                        f"generations of schema A, calls with format=B keep "
+                        f"producing A-shaped output. Fix: split into "
+                        f"separate `with start_session(...) as m:` blocks, "
+                        f"one per distinct format type."
+                    ),
+                    rule_ref="KB5 (session schema priming)",
+                )
+            )
+
+    if result.failures:
+        result.verdict = "fail"
+    return result
+
+
 # ─── Lint: validation-fn-not-called-directly ───
 #
 # Mellea's ``Requirement.validation_fn`` is internal sampling-loop plumbing.
@@ -786,6 +1301,8 @@ def lint_fixture_pydantic_coercion(package_dir: Path) -> LintResult:
     return result
 
 
+
+
 # ─── Runner ───
 
 
@@ -794,6 +1311,9 @@ ALL_LINTS: Tuple[Callable[[Path], LintResult], ...] = (
     lint_bundled_asset_path_resolution,
     lint_runtime_defaults_bound,
     lint_session_method_arity,
+    lint_instruct_result_parse_before_access,
+    lint_format_annotation,
+    lint_session_boundary,
     lint_validation_fn_not_called_directly,
     lint_fixture_pydantic_coercion,
 )
