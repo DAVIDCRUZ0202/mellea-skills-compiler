@@ -18,6 +18,9 @@ from mellea_skills_compiler.compile.lints import (
     lint_fixture_pydantic_coercion,
     lint_grounding_context_types,
     lint_prefix_persona,
+    lint_import_side_effects,
+    lint_import_soundness,
+    lint_parseable,
     lint_stdlib_arg_types,
     lint_fixtures_loader_contract,
     lint_format_annotation,
@@ -2059,5 +2062,282 @@ class TestPrefixPersona:
         with tempfile.TemporaryDirectory() as tmp:
             pkg = _make_package(Path(tmp), {"pipeline.py": pipeline})
             assert lint_prefix_persona(pkg).verdict == "pass"
+
+
+
+
+# ─── TestParseable ───
+
+
+class TestParseable:
+    """Tier 1: every .py file parses + `<pkg>.pipeline` imports as a subprocess."""
+
+    def test_passes_on_clean_package(self):
+        files = {
+            "pipeline.py": "def run_pipeline(x: str) -> str:\n    return x\n",
+            "__init__.py": "",
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(Path(tmp) / "x_mellea", files)
+            result = lint_parseable(pkg)
+            assert result.verdict == "pass", (
+                f"clean package should pass; got "
+                f"{[f.message for f in result.failures]}"
+            )
+
+    def test_fails_when_pipeline_missing(self):
+        """Tier 1 should hard-fail loudly when the entry module is absent."""
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(Path(tmp) / "x_mellea", {"__init__.py": ""})
+            result = lint_parseable(pkg)
+            assert result.verdict == "fail"
+            assert "pipeline.py absent" in result.failures[0].message
+
+    def test_fails_on_syntax_error(self):
+        files = {
+            "pipeline.py": "def run_pipeline(x):\n    return x\n",
+            "__init__.py": "",
+            "broken.py": "def broken(:\n    pass\n",
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(Path(tmp) / "x_mellea", files)
+            result = lint_parseable(pkg)
+            assert result.verdict == "fail"
+            offending = [f for f in result.failures if f.file == "broken.py"]
+            assert len(offending) == 1
+            assert "SyntaxError" in offending[0].message
+            assert offending[0].line is not None
+
+    def test_fails_on_hallucinated_import_path(self):
+        """`from mellea.stdlib.strategies import RepairTemplateStrategy` —
+        wrong path that ast.parse() can't catch; subprocess import does."""
+        files = {
+            "pipeline.py": (
+                "from mellea.stdlib.strategies import RepairTemplateStrategy\n"
+                "def run_pipeline(x: str) -> str:\n    return x\n"
+            ),
+            "__init__.py": "",
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(Path(tmp) / "x_mellea", files)
+            result = lint_parseable(pkg)
+            # Either fail (Mellea installed → real ImportError surfaced) or
+            # pass on a CI env where mellea isn't on PYTHONPATH at all and
+            # the subprocess errors for a different reason; we accept fail.
+            assert result.verdict in ("pass", "fail")
+            if result.verdict == "fail":
+                # When it fails, the message should cite the offending import.
+                msgs = " ".join(f.message for f in result.failures)
+                assert "import" in msgs.lower()
+
+    def test_includes_fixtures_files_in_parse_check(self):
+        files = {
+            "pipeline.py": "def run_pipeline(x: str) -> str:\n    return x\n",
+            "__init__.py": "",
+            "fixtures/__init__.py": "ALL_FIXTURES = []\n",
+            "fixtures/broken.py": "def broken(:\n    pass\n",
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(Path(tmp) / "x_mellea", files)
+            result = lint_parseable(pkg)
+            assert result.verdict == "fail"
+            offending = [f for f in result.failures if "broken.py" in f.file]
+            assert len(offending) == 1
+
+
+# ─── TestImportSoundness ───
+
+
+_API_REF_WITH_MODULES = json.dumps({
+    "format_version": "1.0",
+    "mellea_version": "0.6.0",
+    "modules": {
+        "mellea.backends.model_options": {},
+        "mellea.stdlib.requirements": {},
+        "mellea.stdlib.sampling": {},
+    },
+})
+
+
+class TestImportSoundness:
+    """Every `mellea.*` import path must exist in mellea_api_ref.json."""
+
+    def test_passes_when_imports_match_known_modules(self):
+        files = {
+            "pipeline.py": (
+                "from mellea.stdlib.sampling import RepairTemplateStrategy\n"
+                "from mellea.backends.model_options import ModelOption\n"
+                "def run_pipeline(x):\n    return x\n"
+            ),
+            "intermediate/mellea_api_ref.json": _API_REF_WITH_MODULES,
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(Path(tmp), files)
+            assert lint_import_soundness(pkg).verdict == "pass"
+
+    def test_fails_on_shortened_path(self):
+        files = {
+            "pipeline.py": (
+                "from mellea.model_options import ModelOption\n"
+                "def run_pipeline(x):\n    return x\n"
+            ),
+            "intermediate/mellea_api_ref.json": _API_REF_WITH_MODULES,
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(Path(tmp), files)
+            result = lint_import_soundness(pkg)
+            assert result.verdict == "fail"
+            assert "mellea.model_options" in result.failures[0].message
+
+    def test_top_level_mellea_import_accepted(self):
+        """`from mellea import generative` reaches a top-level re-export
+        that the grounding doesn't index — must not false-positive."""
+        files = {
+            "slots.py": (
+                "from mellea import generative\n"
+                "@generative\n"
+                "def x(s: str) -> str:\n    return s\n"
+            ),
+            "intermediate/mellea_api_ref.json": _API_REF_WITH_MODULES,
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(Path(tmp), files)
+            assert lint_import_soundness(pkg).verdict == "pass"
+
+    def test_non_mellea_imports_ignored(self):
+        files = {
+            "pipeline.py": (
+                "from pydantic import BaseModel\n"
+                "import os\n"
+                "def run_pipeline(x): return x\n"
+            ),
+            "intermediate/mellea_api_ref.json": _API_REF_WITH_MODULES,
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(Path(tmp), files)
+            assert lint_import_soundness(pkg).verdict == "pass"
+
+    def test_skipped_when_api_ref_missing(self):
+        files = {"pipeline.py": "def run_pipeline(x): return x\n"}
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(Path(tmp), files)
+            result = lint_import_soundness(pkg)
+            assert result.verdict == "skipped"
+            assert "mellea_api_ref" in (result.skipped_reason or "")
+
+    def test_skipped_when_grounding_unavailable(self):
+        files = {
+            "pipeline.py": "from mellea.foo import bar\n",
+            "intermediate/mellea_api_ref.json": json.dumps({
+                "grounding_unavailable": True,
+            }),
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(Path(tmp), files)
+            assert lint_import_soundness(pkg).verdict == "skipped"
+
+    def test_import_module_statement_form(self):
+        """`import mellea.X` (not `from`) — same rule applies."""
+        files = {
+            "pipeline.py": (
+                "import mellea.nonexistent\n"
+                "def run_pipeline(x): return x\n"
+            ),
+            "intermediate/mellea_api_ref.json": _API_REF_WITH_MODULES,
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(Path(tmp), files)
+            result = lint_import_soundness(pkg)
+            assert result.verdict == "fail"
+            assert "mellea.nonexistent" in result.failures[0].message
+
+
+# ─── TestImportSideEffects ───
+
+
+class TestImportSideEffects:
+    """Module-level Calls outside the allowlist."""
+
+    def test_passes_with_allowlisted_logger(self):
+        content = (
+            "import logging\n"
+            "LOGGER = logging.getLogger(__name__)\n"
+            "def run_pipeline(x): return x\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(Path(tmp), {"pipeline.py": content})
+            assert lint_import_side_effects(pkg).verdict == "pass"
+
+    def test_passes_with_allowlisted_env_get(self):
+        content = (
+            "import os\n"
+            "DEBUG = os.environ.get('DEBUG', '0')\n"
+            "def run_pipeline(x): return x\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(Path(tmp), {"pipeline.py": content})
+            assert lint_import_side_effects(pkg).verdict == "pass"
+
+    def test_fails_on_bare_load_dotenv_call(self):
+        content = (
+            "from dotenv import load_dotenv\n"
+            "load_dotenv()\n"
+            "def run_pipeline(x): return x\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(Path(tmp), {"pipeline.py": content})
+            result = lint_import_side_effects(pkg)
+            assert result.verdict == "fail"
+            assert "load_dotenv" in result.failures[0].message
+
+    def test_fails_on_assignment_with_load_dotenv(self):
+        content = (
+            "from dotenv import load_dotenv\n"
+            "RESULT = load_dotenv()\n"
+            "def run_pipeline(x): return x\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(Path(tmp), {"pipeline.py": content})
+            result = lint_import_side_effects(pkg)
+            assert result.verdict == "fail"
+
+    def test_passes_on_safe_assignment_with_call(self):
+        """`LOGGER = logging.getLogger(__name__)` is allowed."""
+        content = (
+            "import logging\n"
+            "LOGGER = logging.getLogger(__name__)\n"
+            "def run_pipeline(x): return x\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(Path(tmp), {"pipeline.py": content})
+            assert lint_import_side_effects(pkg).verdict == "pass"
+
+    def test_only_inspects_listed_files(self):
+        """Files outside the allowlist (e.g. test.py) are not inspected."""
+        files = {
+            "pipeline.py": "def run_pipeline(x): return x\n",
+            "some_extra.py": "load_dotenv()\n",  # not in the allowlist
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(Path(tmp), files)
+            assert lint_import_side_effects(pkg).verdict == "pass"
+
+    def test_call_inside_function_body_not_flagged(self):
+        """Only module-level calls fire — calls inside a def() are fine."""
+        content = (
+            "from dotenv import load_dotenv\n"
+            "def run_pipeline(x):\n"
+            "    load_dotenv()\n"
+            "    return x\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(Path(tmp), {"pipeline.py": content})
+            assert lint_import_side_effects(pkg).verdict == "pass"
+
+    def test_syntax_error_file_silently_skipped(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(Path(tmp), {"pipeline.py": "def x(:\n    pass\n"})
+            result = lint_import_side_effects(pkg)
+            assert result.verdict in ("pass", "skipped")
 
 

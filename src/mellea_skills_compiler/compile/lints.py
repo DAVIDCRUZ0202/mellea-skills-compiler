@@ -1871,6 +1871,455 @@ def _iter_function_scopes(tree: ast.AST):
 
 
 
+# ─── Lint: import-soundness ───
+#
+# Every `mellea.*` import path in the compiled package must exist in the
+# introspected Mellea API surface at `intermediate/mellea_api_ref.json`.
+# Catches the LLM hallucinating shortened or non-existent import paths
+# (e.g. `from mellea.model_options import ...` when the symbol lives at
+# `mellea.backends.model_options`).
+#
+# Skipped when the api_ref is missing, malformed, or marked
+# ``grounding_unavailable=true`` — the lint can't run without ground truth.
+
+
+def _load_known_mellea_modules(package_dir: Path) -> Optional[Set[str]]:
+    """Return the set of `mellea.*` module paths from the grounding file.
+
+    Returns ``None`` if `intermediate/mellea_api_ref.json` is absent,
+    malformed, or carries `grounding_unavailable=true`.
+    """
+    api_ref_path = package_dir / "intermediate" / "mellea_api_ref.json"
+    if not api_ref_path.exists():
+        return None
+    try:
+        data = json.loads(api_ref_path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    if data.get("grounding_unavailable", False):
+        return None
+    modules = data.get("modules")
+    if not isinstance(modules, dict):
+        return None
+    return {k for k in modules.keys() if isinstance(k, str)}
+
+
+def lint_import_soundness(package_dir: Path) -> LintResult:
+    """Every `mellea.*` import path must exist in `mellea_api_ref.json:.modules`."""
+    result = LintResult(lint_id="import-soundness", verdict="pass")
+
+    known_modules = _load_known_mellea_modules(package_dir)
+    if known_modules is None:
+        result.verdict = "skipped"
+        result.skipped_reason = (
+            "intermediate/mellea_api_ref.json absent, malformed, or marked "
+            "grounding_unavailable=true"
+        )
+        return result
+
+    py_files: List[Path] = []
+    for p in sorted(package_dir.rglob("*.py")):
+        rel = p.relative_to(package_dir).as_posix()
+        if not _is_skipped_path(rel):
+            py_files.append(p)
+    result.files_checked = len(py_files)
+
+    for py_file in py_files:
+        rel = py_file.relative_to(package_dir).as_posix()
+        try:
+            tree = ast.parse(py_file.read_text(), filename=str(py_file))
+        except SyntaxError:
+            continue  # the parseable lint is responsible
+
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                module = node.module or ""
+                if not module.startswith("mellea"):
+                    continue
+                # `from mellea import generative` / `from mellea import
+                # start_session` reaches top-level re-exports — accept
+                # `mellea` itself as known even though the grounding
+                # indexes sub-modules only.
+                if module == "mellea":
+                    continue
+                if module in known_modules:
+                    continue
+                result.failures.append(
+                    LintFailure(
+                        file=rel,
+                        line=getattr(node, "lineno", None),
+                        column=_col_offset_to_schema(node),
+                        message=(
+                            f"`from {module} import ...` references a Mellea "
+                            f"module path that does not exist in "
+                            f"intermediate/mellea_api_ref.json:.modules. "
+                            f"Common error: a shortened path (e.g. "
+                            f"`mellea.model_options` instead of "
+                            f"`mellea.backends.model_options`)."
+                        ),
+                        rule_ref="Rule 4-2 (import-soundness)",
+                    )
+                )
+            elif isinstance(node, ast.Import):
+                for alias in node.names:
+                    name = alias.name
+                    if not name.startswith("mellea"):
+                        continue
+                    if name in known_modules:
+                        continue
+                    result.failures.append(
+                        LintFailure(
+                            file=rel,
+                            line=getattr(node, "lineno", None),
+                            column=_col_offset_to_schema(node),
+                            message=(
+                                f"`import {name}` references a Mellea module "
+                                f"path that does not exist in "
+                                f"intermediate/mellea_api_ref.json:.modules."
+                            ),
+                            rule_ref="Rule 4-2 (import-soundness)",
+                        )
+                    )
+
+    if result.failures:
+        result.verdict = "fail"
+    return result
+
+
+# ─── Lint: import-side-effects ───
+#
+# Module-level Call expressions execute at import time. The package must be
+# importable for inspection / lint walks / test discovery without side
+# effects; calls like `load_dotenv()`, `requests.get(...)` at module scope
+# are forbidden. A small allowlist permits idempotent registry lookups
+# (`logging.getLogger`, `os.environ.get`, `os.getenv`).
+
+
+_IMPORT_SIDE_EFFECTS_FILES: Tuple[str, ...] = (
+    "pipeline.py",
+    "slots.py",
+    "constrained_slots.py",
+    "requirements.py",
+    "schemas.py",
+    "tools.py",
+    "loader.py",
+    "main.py",
+    "config.py",
+)
+
+_ALLOWED_TOP_LEVEL_CALL_NAMES: frozenset = frozenset({
+    "getLogger",  # logging.getLogger() — idempotent registry lookup
+    "get",        # os.environ.get(...) for config
+    "Final",      # typing.Final (legacy compatibility — not actually a call)
+})
+
+
+def _expr_callee_chain(node: ast.expr) -> Optional[str]:
+    """Return the dotted callee chain of a Call.func, or None.
+
+    Examples:
+      `getLogger(__name__)` → "getLogger"
+      `logging.getLogger(...)` → "logging.getLogger"
+      `os.environ.get(...)` → "os.environ.get"
+    """
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        chain = node.attr
+        cur = node.value
+        while isinstance(cur, ast.Attribute):
+            chain = cur.attr + "." + chain
+            cur = cur.value
+        if isinstance(cur, ast.Name):
+            chain = cur.id + "." + chain
+        return chain
+    return None
+
+
+def _is_allowed_top_level_call(call: ast.Call) -> bool:
+    """Allowlist check: idempotent registry lookups + simple env reads."""
+    chain = _expr_callee_chain(call.func)
+    if chain is None:
+        return False
+    leaf = chain.rsplit(".", 1)[-1]
+    if leaf in _ALLOWED_TOP_LEVEL_CALL_NAMES:
+        return True
+    if chain in ("logging.getLogger", "os.environ.get", "os.getenv"):
+        return True
+    return False
+
+
+_KNOWN_SIDE_EFFECTING_CHAINS: frozenset = frozenset({
+    "load_dotenv",
+    "dotenv.load_dotenv",
+    "requests.get",
+    "requests.post",
+    "urlopen",
+    "urllib.request.urlopen",
+})
+
+
+def lint_import_side_effects(package_dir: Path) -> LintResult:
+    """No module-level Calls outside the documented allowlist.
+
+    Bare ``ast.Expr`` whose value is a Call (e.g. ``load_dotenv()`` at the
+    top of a file) executes at import time; flagged. Module-level assignments
+    where the RHS is a Call are flagged only when the callee is known to be
+    side-effecting (network/env mutation) — allowing safe patterns like
+    ``LOGGER = logging.getLogger(__name__)``.
+    """
+    result = LintResult(lint_id="import-side-effects", verdict="pass")
+
+    files_to_check: List[Path] = []
+    for fname in _IMPORT_SIDE_EFFECTS_FILES:
+        p = package_dir / fname
+        if p.exists():
+            files_to_check.append(p)
+    result.files_checked = len(files_to_check)
+
+    for py_file in files_to_check:
+        rel = py_file.relative_to(package_dir).as_posix()
+        try:
+            tree = ast.parse(py_file.read_text(), filename=str(py_file))
+        except SyntaxError:
+            continue
+
+        for stmt in tree.body:
+            # Bare Call statement at module level
+            if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call):
+                if _is_allowed_top_level_call(stmt.value):
+                    continue
+                chain = _expr_callee_chain(stmt.value.func) or "<unresolved>"
+                result.failures.append(
+                    LintFailure(
+                        file=rel,
+                        line=getattr(stmt, "lineno", None),
+                        column=_col_offset_to_schema(stmt),
+                        message=(
+                            f"module-level call `{chain}(...)` executes at "
+                            f"import time. Outside the allowlist "
+                            f"(logging.getLogger, os.environ.get, os.getenv), "
+                            f"this is forbidden because import-time side "
+                            f"effects make the package un-importable for "
+                            f"inspection / introduce test-order coupling / "
+                            f"fail in non-runtime contexts. Move into a "
+                            f"function call site or the run_pipeline entry."
+                        ),
+                        rule_ref="import-side-effects",
+                    )
+                )
+            # Assignment with Call RHS at module level — fail only when the
+            # callee is a known side-effecting name. Don't flag safe patterns
+            # like `LOGGER = logging.getLogger(__name__)`.
+            elif isinstance(stmt, ast.Assign) and isinstance(stmt.value, ast.Call):
+                if _is_allowed_top_level_call(stmt.value):
+                    continue
+                chain = _expr_callee_chain(stmt.value.func) or "<unresolved>"
+                if chain in _KNOWN_SIDE_EFFECTING_CHAINS:
+                    result.failures.append(
+                        LintFailure(
+                            file=rel,
+                            line=getattr(stmt, "lineno", None),
+                            column=_col_offset_to_schema(stmt),
+                            message=(
+                                f"module-level assignment "
+                                f"`<var> = {chain}(...)` executes the callee "
+                                f"at import. `{chain}` is known to have side "
+                                f"effects (env mutation, network I/O) and is "
+                                f"forbidden outside an explicit function "
+                                f"scope. Move the call inside `run_pipeline` "
+                                f"or another lazy entry point."
+                            ),
+                            rule_ref="import-side-effects",
+                        )
+                    )
+
+    if result.failures:
+        result.verdict = "fail"
+    return result
+
+
+# ─── Lint: parseable (Tier 1) ───
+#
+# Two checks: per-file ``ast.parse()`` on every .py under the package, and
+# a subprocess ``python -c "import <pkg>.pipeline"`` to surface import
+# errors AST can't see (wrong external import paths, etc.).
+
+
+def lint_parseable(package_dir: Path) -> LintResult:
+    """Every `.py` file under the package must parse, and `<pkg>.pipeline` must import.
+
+    Two checks, executed in order:
+
+      1. Per-file parseability: `ast.parse(p.read_text())` for every `.py`
+         file directly under `<package_dir>/` and `<package_dir>/fixtures/`.
+      2. Package importability: `python -c "import <package_name>.pipeline"`
+         executed as a clean subprocess from `<package_dir>.parent`. This
+         surfaces wrong external import paths (e.g.
+         `mellea.stdlib.strategies` instead of `mellea.stdlib.sampling`)
+         that `ast.parse()` cannot detect.
+
+    Why a subprocess: importing the package directly in the lint process
+    would pollute namespace, risk hanging on import side effects, or get
+    masked by cached `sys.modules` entries. A clean child process surfaces
+    exactly the error a downstream consumer (`pip install` + `python -c`)
+    would see.
+
+    Missing `pipeline.py`: returns one ERROR failure naming the absent
+    entry module. Tier 1 should hard-fail loudly so the slash-command
+    gate halts before Tier 2/3 lints run on a package with no entry.
+
+    Scope: files directly under `<package_dir>/` and
+    `<package_dir>/fixtures/` only.
+    """
+    import subprocess
+    import sys
+
+    result = LintResult(lint_id="parseable", verdict="pass")
+
+    pipeline_path = package_dir / "pipeline.py"
+    if not pipeline_path.exists():
+        result.verdict = "fail"
+        result.failures.append(
+            LintFailure(
+                file="pipeline.py",
+                line=None,
+                column=None,
+                message=(
+                    "pipeline.py absent — parseable lint cannot run. "
+                    "The Tier 1 importability check requires the canonical "
+                    "entry module `<package_name>/pipeline.py`. This is a "
+                    "mandatory output of every compile (Rule 3-2)."
+                ),
+                rule_ref="mellea-fy-validate.md#tier-1-parseability",
+            )
+        )
+        return result
+
+    # ── Check 1: per-file ast.parse() ──
+    py_files: List[Path] = []
+    pkg_root_files = sorted(p for p in package_dir.glob("*.py"))
+    fixtures_dir = package_dir / "fixtures"
+    fixtures_files: List[Path] = []
+    if fixtures_dir.is_dir():
+        fixtures_files = sorted(p for p in fixtures_dir.glob("*.py"))
+    py_files.extend(pkg_root_files)
+    py_files.extend(fixtures_files)
+    result.files_checked = len(py_files)
+
+    for py_file in py_files:
+        rel = py_file.relative_to(package_dir).as_posix()
+        try:
+            ast.parse(py_file.read_text(), filename=str(py_file))
+        except SyntaxError as exc:
+            result.failures.append(
+                LintFailure(
+                    file=rel,
+                    line=exc.lineno,
+                    column=exc.offset,
+                    message=(
+                        f"SyntaxError parsing {rel}: {exc.msg}. "
+                        f"The file is not a valid Python module; "
+                        f"downstream lints and runtime import will fail."
+                    ),
+                    rule_ref="mellea-fy-validate.md#tier-1-parseability",
+                )
+            )
+        except Exception as exc:  # noqa: BLE001 — any read/decode error is fatal
+            result.failures.append(
+                LintFailure(
+                    file=rel,
+                    line=None,
+                    column=None,
+                    message=(
+                        f"{type(exc).__name__} reading or parsing {rel}: {exc}."
+                    ),
+                    rule_ref="mellea-fy-validate.md#tier-1-parseability",
+                )
+            )
+
+    # If any file failed to parse, skip the import check — the subprocess
+    # import would crash on the same syntax error with a less specific
+    # traceback.
+    if result.failures:
+        result.verdict = "fail"
+        return result
+
+    # ── Check 2: subprocess import of `<package_name>.pipeline` ──
+    package_name = package_dir.name
+    parent = package_dir.parent
+    cmd = [sys.executable, "-c", f"import {package_name}.pipeline"]
+    env_path = str(parent)
+    try:
+        proc = subprocess.run(
+            cmd,
+            cwd=str(parent),
+            env={"PYTHONPATH": env_path, "PATH": "/usr/bin:/bin"},
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except subprocess.TimeoutExpired:
+        result.failures.append(
+            LintFailure(
+                file="pipeline.py",
+                line=None,
+                column=None,
+                message=(
+                    f"Timeout (>30s) importing {package_name}.pipeline. "
+                    f"Module-level code is likely blocking (infinite loop, "
+                    f"blocking network call, or a deadlock). Import-time "
+                    f"side effects are forbidden — see import-side-effects."
+                ),
+                rule_ref="mellea-fy-validate.md#tier-1-parseability",
+            )
+        )
+        result.verdict = "fail"
+        return result
+    except Exception as exc:  # noqa: BLE001
+        result.failures.append(
+            LintFailure(
+                file="pipeline.py",
+                line=None,
+                column=None,
+                message=(
+                    f"Failed to spawn subprocess for import check: "
+                    f"{type(exc).__name__}: {exc}"
+                ),
+                rule_ref="mellea-fy-validate.md#tier-1-parseability",
+            )
+        )
+        result.verdict = "fail"
+        return result
+
+    if proc.returncode != 0:
+        stderr = (proc.stderr or "").strip()
+        if len(stderr) > 2000:
+            stderr = "... " + stderr[-2000:]
+        result.failures.append(
+            LintFailure(
+                file="pipeline.py",
+                line=None,
+                column=None,
+                message=(
+                    f"`python -c 'import {package_name}.pipeline'` failed "
+                    f"(exit {proc.returncode}). This catches wrong external "
+                    f"import paths (e.g. `mellea.stdlib.strategies` vs the "
+                    f"real `mellea.stdlib.sampling`) that ast.parse() cannot "
+                    f"detect. Subprocess stderr:\n{stderr}"
+                ),
+                rule_ref="mellea-fy-validate.md#tier-1-parseability",
+            )
+        )
+        result.verdict = "fail"
+        return result
+
+    return result
+
+
+
 # ─── Runner ───
 
 
@@ -1887,6 +2336,9 @@ ALL_LINTS: Tuple[Callable[[Path], LintResult], ...] = (
     lint_grounding_context_types,
     lint_stdlib_arg_types,
     lint_prefix_persona,
+    lint_parseable,
+    lint_import_soundness,
+    lint_import_side_effects,
 )
 
 
