@@ -16,6 +16,9 @@ from typing import Dict
 from mellea_skills_compiler.compile.lints import (
     lint_bundled_asset_path_resolution,
     lint_fixture_pydantic_coercion,
+    lint_grounding_context_types,
+    lint_prefix_persona,
+    lint_stdlib_arg_types,
     lint_fixtures_loader_contract,
     lint_format_annotation,
     lint_instruct_result_parse_before_access,
@@ -1598,3 +1601,463 @@ class TestFixturePydanticCoercion:
             assert result.verdict == "fail"
             assert len(result.failures) == 1
             assert result.failures[0].file == "fixtures/b.py"
+
+
+# ─── TestGroundingContextTypes ───
+
+
+class TestGroundingContextTypes:
+    """Test cases for lint_grounding_context_types.
+
+    Regression target: a `m.instruct(..., grounding_context={...})` call
+    whose dict value was a list comprehension produced
+    `ValueError: parts should only contain CBlocks, Components, or
+    ModelOutputThunks; found <list>` at runtime.
+    """
+
+    def test_passes_with_string_literal_values(self):
+        pipeline = (
+            "from mellea import start_session\n"
+            "from .schemas import S\n"
+            "def f():\n"
+            "    with start_session('o','m') as m:\n"
+            "        return m.instruct('go', format=S, grounding_context={'a': 'hello', 'b': 'world'})\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(Path(tmp), {"pipeline.py": pipeline})
+            assert lint_grounding_context_types(pkg).verdict == "pass"
+
+    def test_passes_with_str_call(self):
+        pipeline = (
+            "from mellea import start_session\n"
+            "from .schemas import S\n"
+            "def f(x):\n"
+            "    with start_session('o','m') as m:\n"
+            "        return m.instruct('go', format=S, grounding_context={'x': str(x)})\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(Path(tmp), {"pipeline.py": pipeline})
+            assert lint_grounding_context_types(pkg).verdict == "pass"
+
+    def test_passes_with_fstring(self):
+        pipeline = (
+            "from mellea import start_session\n"
+            "from .schemas import S\n"
+            "def f(x):\n"
+            "    with start_session('o','m') as m:\n"
+            "        return m.instruct('go', format=S, grounding_context={'x': f'value={x}'})\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(Path(tmp), {"pipeline.py": pipeline})
+            assert lint_grounding_context_types(pkg).verdict == "pass"
+
+    def test_fails_with_list_comprehension(self):
+        pipeline = (
+            "from mellea import start_session\n"
+            "from .schemas import MitigationPlan\n"
+            "def f(risks):\n"
+            "    with start_session('o','m') as m:\n"
+            "        return m.instruct('go', format=MitigationPlan, "
+            "grounding_context={'risks': [r.model_dump() for r in risks]})\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(Path(tmp), {"pipeline.py": pipeline})
+            result = lint_grounding_context_types(pkg)
+            assert result.verdict == "fail"
+            assert any(
+                "collection-literal" in f.message.lower()
+                or "list" in f.message.lower()
+                for f in result.failures
+            )
+
+    def test_fails_with_list_literal(self):
+        pipeline = (
+            "from mellea import start_session\n"
+            "from .schemas import S\n"
+            "def f():\n"
+            "    with start_session('o','m') as m:\n"
+            "        return m.instruct('go', format=S, grounding_context={'items': ['a', 'b']})\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(Path(tmp), {"pipeline.py": pipeline})
+            assert lint_grounding_context_types(pkg).verdict == "fail"
+
+    def test_fails_with_dict_literal(self):
+        pipeline = (
+            "from mellea import start_session\n"
+            "from .schemas import S\n"
+            "def f():\n"
+            "    with start_session('o','m') as m:\n"
+            "        return m.instruct('go', format=S, grounding_context={'obj': {'k': 'v'}})\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(Path(tmp), {"pipeline.py": pipeline})
+            assert lint_grounding_context_types(pkg).verdict == "fail"
+
+    def test_warns_with_bare_name(self):
+        """Name/Attribute values are ambiguous — could be a string at runtime."""
+        pipeline = (
+            "from mellea import start_session\n"
+            "from .schemas import S\n"
+            "def f(some_var):\n"
+            "    with start_session('o','m') as m:\n"
+            "        return m.instruct('go', format=S, grounding_context={'x': some_var})\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(Path(tmp), {"pipeline.py": pipeline})
+            result = lint_grounding_context_types(pkg)
+            assert result.verdict == "warning"
+            assert len(result.failures) == 1
+
+    def test_warns_with_attribute_access(self):
+        pipeline = (
+            "from mellea import start_session\n"
+            "from .schemas import S\n"
+            "def f(obj):\n"
+            "    with start_session('o','m') as m:\n"
+            "        return m.instruct('go', format=S, grounding_context={'x': obj.field})\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(Path(tmp), {"pipeline.py": pipeline})
+            assert lint_grounding_context_types(pkg).verdict == "warning"
+
+    def test_mixed_definite_and_ambiguous_returns_fail(self):
+        """Any definite collection elevates the overall verdict to fail."""
+        pipeline = (
+            "from mellea import start_session\n"
+            "from .schemas import S\n"
+            "def f(v, risks):\n"
+            "    with start_session('o','m') as m:\n"
+            "        return m.instruct('go', format=S, grounding_context={"
+            "'ambiguous': v, 'definite': [r for r in risks]})\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(Path(tmp), {"pipeline.py": pipeline})
+            result = lint_grounding_context_types(pkg)
+            assert result.verdict == "fail"
+            assert len(result.failures) == 2
+
+    def test_passes_when_no_grounding_context(self):
+        pipeline = (
+            "from mellea import start_session\n"
+            "from .schemas import S\n"
+            "def f():\n"
+            "    with start_session('o','m') as m:\n"
+            "        return m.instruct('go', format=S)\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(Path(tmp), {"pipeline.py": pipeline})
+            assert lint_grounding_context_types(pkg).verdict == "pass"
+
+    def test_skips_unparseable_files(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(
+                Path(tmp), {"pipeline.py": "def broken(:\n    pass\n"}
+            )
+            assert lint_grounding_context_types(pkg).verdict == "pass"
+
+    def test_walks_slots_and_constrained_slots(self):
+        bad = (
+            "from mellea import start_session\n"
+            "from .schemas import S\n"
+            "def f(items):\n"
+            "    with start_session('o','m') as m:\n"
+            "        return m.instruct('go', format=S, "
+            "grounding_context={'items': [x for x in items]})\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(
+                Path(tmp),
+                {"slots.py": bad, "constrained_slots.py": bad},
+            )
+            result = lint_grounding_context_types(pkg)
+            assert result.verdict == "fail"
+            files = sorted(f.file for f in result.failures)
+            assert files == ["constrained_slots.py", "slots.py"]
+
+
+# ─── TestStdlibArgTypes ───
+
+
+class TestStdlibArgTypes:
+    """Test cases for lint_stdlib_arg_types.
+
+    Narrow MVP: checks `grounding_context=` on instruct/chat/act family
+    methods for clearly-non-dict arguments (non-dict Constant, f-string,
+    or Name pointing to a parameter with a provably-non-dict annotation).
+    Ambiguous cases (no annotation, Any, Optional/Union) pass silently.
+    """
+
+    def test_passes_with_dict_literal(self):
+        pipeline = (
+            "def f():\n"
+            "    m.instruct('go', grounding_context={'a': 'b'})\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(Path(tmp), {"pipeline.py": pipeline})
+            assert lint_stdlib_arg_types(pkg).verdict == "pass"
+
+    def test_passes_with_dict_call(self):
+        pipeline = (
+            "def f():\n"
+            "    m.instruct('go', grounding_context=dict(a='b'))\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(Path(tmp), {"pipeline.py": pipeline})
+            assert lint_stdlib_arg_types(pkg).verdict == "pass"
+
+    def test_passes_with_grounding_context_none(self):
+        """`grounding_context=None` is a Mellea idiom; don't flag."""
+        pipeline = (
+            "def f():\n"
+            "    m.instruct('go', grounding_context=None)\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(Path(tmp), {"pipeline.py": pipeline})
+            assert lint_stdlib_arg_types(pkg).verdict == "pass"
+
+    def test_passes_with_name_dict_annotated(self):
+        pipeline = (
+            "def f(ctx: dict):\n"
+            "    m.instruct('go', grounding_context=ctx)\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(Path(tmp), {"pipeline.py": pipeline})
+            assert lint_stdlib_arg_types(pkg).verdict == "pass"
+
+    def test_passes_with_name_mapping_annotated(self):
+        pipeline = (
+            "from typing import Mapping\n"
+            "def f(ctx: Mapping[str, str]):\n"
+            "    m.instruct('go', grounding_context=ctx)\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(Path(tmp), {"pipeline.py": pipeline})
+            assert lint_stdlib_arg_types(pkg).verdict == "pass"
+
+    def test_passes_with_name_no_annotation(self):
+        """Unannotated parameter is ambiguous — must NOT flag."""
+        pipeline = (
+            "def f(ctx):\n"
+            "    m.instruct('go', grounding_context=ctx)\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(Path(tmp), {"pipeline.py": pipeline})
+            assert lint_stdlib_arg_types(pkg).verdict == "pass"
+
+    def test_passes_with_name_any_annotation(self):
+        pipeline = (
+            "from typing import Any\n"
+            "def f(ctx: Any):\n"
+            "    m.instruct('go', grounding_context=ctx)\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(Path(tmp), {"pipeline.py": pipeline})
+            assert lint_stdlib_arg_types(pkg).verdict == "pass"
+
+    def test_passes_with_name_optional_annotation(self):
+        """`Optional[str]` could be `None` (handled separately) or a string;
+        lint stays conservative and doesn't flag."""
+        pipeline = (
+            "from typing import Optional\n"
+            "def f(ctx: Optional[dict]):\n"
+            "    m.instruct('go', grounding_context=ctx)\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(Path(tmp), {"pipeline.py": pipeline})
+            assert lint_stdlib_arg_types(pkg).verdict == "pass"
+
+    def test_fails_with_string_literal(self):
+        pipeline = (
+            "def f():\n"
+            "    m.instruct('go', grounding_context='oops')\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(Path(tmp), {"pipeline.py": pipeline})
+            result = lint_stdlib_arg_types(pkg)
+            assert result.verdict == "fail"
+            assert "non-dict literal" in result.failures[0].message
+
+    def test_fails_with_int_literal(self):
+        pipeline = (
+            "def f():\n"
+            "    m.instruct('go', grounding_context=42)\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(Path(tmp), {"pipeline.py": pipeline})
+            assert lint_stdlib_arg_types(pkg).verdict == "fail"
+
+    def test_fails_with_fstring(self):
+        pipeline = (
+            "def f(x):\n"
+            "    m.instruct('go', grounding_context=f'hello {x}')\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(Path(tmp), {"pipeline.py": pipeline})
+            assert lint_stdlib_arg_types(pkg).verdict == "fail"
+
+    def test_fails_with_name_concrete_class_annotation(self):
+        pipeline = (
+            "class NegotiationContext:\n"
+            "    pass\n"
+            "def f(ctx: NegotiationContext):\n"
+            "    m.instruct('go', grounding_context=ctx)\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(Path(tmp), {"pipeline.py": pipeline})
+            result = lint_stdlib_arg_types(pkg)
+            assert result.verdict == "fail"
+            assert "ctx" in result.failures[0].message
+            assert "model_dump" in result.failures[0].message
+
+    def test_fails_with_name_list_annotation(self):
+        pipeline = (
+            "def f(items: list[str]):\n"
+            "    m.instruct('go', grounding_context=items)\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(Path(tmp), {"pipeline.py": pipeline})
+            assert lint_stdlib_arg_types(pkg).verdict == "fail"
+
+    def test_fails_with_chat_and_act_methods(self):
+        pipeline = (
+            "def f():\n"
+            "    m.chat('go', grounding_context='oops')\n"
+            "    m.act('go', grounding_context=42)\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(Path(tmp), {"pipeline.py": pipeline})
+            result = lint_stdlib_arg_types(pkg)
+            assert result.verdict == "fail"
+            assert len(result.failures) == 2
+
+    def test_passes_with_no_grounding_context_kwarg(self):
+        pipeline = (
+            "def f():\n"
+            "    m.instruct('go')\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(Path(tmp), {"pipeline.py": pipeline})
+            assert lint_stdlib_arg_types(pkg).verdict == "pass"
+
+    def test_skips_unparseable_files(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(
+                Path(tmp), {"pipeline.py": "def broken(:\n    pass\n"}
+            )
+            assert lint_stdlib_arg_types(pkg).verdict == "pass"
+
+    def test_walks_requirements_and_tools(self):
+        bad = (
+            "def f():\n"
+            "    m.instruct('go', grounding_context='oops')\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(
+                Path(tmp), {"requirements.py": bad, "tools.py": bad}
+            )
+            result = lint_stdlib_arg_types(pkg)
+            assert result.verdict == "fail"
+            files = sorted(f.file for f in result.failures)
+            assert files == ["requirements.py", "tools.py"]
+
+    def test_passes_with_no_pipeline_files_present(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(Path(tmp), {"main.py": "x = 1\n"})
+            result = lint_stdlib_arg_types(pkg)
+            assert result.verdict == "pass"
+            assert result.files_checked == 0
+
+
+# ─── TestPrefixPersona ───
+
+
+class TestPrefixPersona:
+    """Test cases for lint_prefix_persona (KB7)."""
+
+    def test_passes_with_string_literal_prefix(self):
+        pipeline = (
+            "from mellea import start_session\n"
+            "from .schemas import Result\n"
+            "def run_pipeline(q):\n"
+            "    with start_session('o','m') as m:\n"
+            '        r = m.instruct(q, format=Result, prefix=\'{"value":\')\n'
+            "    return r\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(Path(tmp), {"pipeline.py": pipeline})
+            assert lint_prefix_persona(pkg).verdict == "pass"
+
+    def test_fails_with_config_constant_via_assignment(self):
+        config = 'PREFIX_TEXT = "You are a helpful agent."\n'
+        pipeline = (
+            "from mellea import start_session\n"
+            "from .config import PREFIX_TEXT\n"
+            "def run_pipeline(q):\n"
+            "    with start_session('o','m') as m:\n"
+            "        return m.instruct(q, prefix=PREFIX_TEXT)\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(
+                Path(tmp), {"config.py": config, "pipeline.py": pipeline}
+            )
+            result = lint_prefix_persona(pkg)
+            assert result.verdict == "fail"
+            assert "PREFIX_TEXT" in result.failures[0].message
+            assert "SYSTEM_PROMPT" in result.failures[0].message
+
+    def test_passes_with_system_prompt_pattern(self):
+        config = 'PREFIX_TEXT = "persona"\n'
+        pipeline = (
+            "from mellea import start_session\n"
+            "from mellea.backends.model_options import ModelOption\n"
+            "from .config import PREFIX_TEXT\n"
+            "def run_pipeline(q):\n"
+            "    with start_session('o','m') as m:\n"
+            "        return m.instruct(q, model_options={ModelOption.SYSTEM_PROMPT: PREFIX_TEXT})\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(
+                Path(tmp), {"config.py": config, "pipeline.py": pipeline}
+            )
+            assert lint_prefix_persona(pkg).verdict == "pass"
+
+    def test_fails_with_config_import_no_config_py(self):
+        pipeline = (
+            "from mellea import start_session\n"
+            "from .config import PERSONA\n"
+            "def run_pipeline(q):\n"
+            "    with start_session('o','m') as m:\n"
+            "        return m.instruct(q, prefix=PERSONA)\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(Path(tmp), {"pipeline.py": pipeline})
+            result = lint_prefix_persona(pkg)
+            assert result.verdict == "fail"
+            assert "PERSONA" in result.failures[0].message
+
+    def test_fails_with_bare_name(self):
+        pipeline = (
+            "from mellea import start_session\n"
+            "def run_pipeline(q):\n"
+            "    PREFIX_TEXT = 'persona'\n"
+            "    with start_session('o','m') as m:\n"
+            "        return m.instruct(q, prefix=PREFIX_TEXT)\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(Path(tmp), {"pipeline.py": pipeline})
+            assert lint_prefix_persona(pkg).verdict == "fail"
+
+    def test_passes_with_no_prefix_kwarg(self):
+        pipeline = (
+            "from mellea import start_session\n"
+            "from .schemas import R\n"
+            "def run_pipeline(q):\n"
+            "    with start_session('o','m') as m:\n"
+            "        return m.instruct(q, format=R)\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(Path(tmp), {"pipeline.py": pipeline})
+            assert lint_prefix_persona(pkg).verdict == "pass"
+
+
