@@ -1,11 +1,9 @@
 """Unit tests for mellea_skills_compiler.compile.lints module.
 
-Tests the three Step 7 structural lints (fixtures-loader-contract,
-bundled-asset-path-resolution, runtime-defaults-bound) plus the run_lints
-runner that emits intermediate/step_7_report.json.
-
-All tests construct synthetic skill packages on disk in tempfile.TemporaryDirectory
-contexts; no network, Ollama, or slash-command invocation.
+Covers every implemented Step 7 structural lint plus the run_lints runner
+that emits intermediate/step_7_report.json. All tests construct synthetic
+skill packages on disk in tempfile.TemporaryDirectory contexts; no network,
+Ollama, or slash-command invocation.
 """
 
 from __future__ import annotations
@@ -19,7 +17,10 @@ from mellea_skills_compiler.compile.lints import (
     lint_bundled_asset_path_resolution,
     lint_fixture_pydantic_coercion,
     lint_fixtures_loader_contract,
+    lint_format_annotation,
+    lint_instruct_result_parse_before_access,
     lint_runtime_defaults_bound,
+    lint_session_boundary,
     lint_session_method_arity,
     lint_validation_fn_not_called_directly,
     run_lints,
@@ -493,10 +494,17 @@ class TestRunLints:
             "from pathlib import Path\n"
             "p = Path(__file__).parent / 'scripts' / 'bash' / 'x.sh'\n"
         )
+        pipeline = "def run_pipeline(x: str) -> str:\n    return x\n"
         with tempfile.TemporaryDirectory() as tmp:
+            # The Tier 1 `parseable` lint requires <pkg>/pipeline.py to
+            # exist and import cleanly; a "compliant package" must include
+            # it. We materialise the package under an `_mellea`-suffixed
+            # parent so the subprocess `import <pkg>.pipeline` resolves.
             pkg = _make_package(
-                Path(tmp),
+                Path(tmp) / "synthetic_mellea",
                 {
+                    "__init__.py": "",
+                    "pipeline.py": pipeline,
                     "fixtures/__init__.py": "ALL_FIXTURES = []\n",
                     "config.py": config,
                     "tools.py": tools,
@@ -769,24 +777,470 @@ class TestValidationFnNotCalledDirectly:
                     "pipeline.py": "def y():\n    pass\n",
                 },
             )
-            assert lint_validation_fn_not_called_directly(pkg).verdict == "pass"
 
-    def test_syntax_error_file_silently_skipped(self):
-        content = "def broken(:\n    pass\n"
-        with tempfile.TemporaryDirectory() as tmp:
-            pkg = _make_package(Path(tmp), {"pipeline.py": content})
-            result = lint_validation_fn_not_called_directly(pkg)
-            assert result.verdict in ("pass", "skipped")
 
-    def test_failure_message_guides_to_correct_idiom(self):
-        content = "def x():\n    req.validation_fn(ctx)\n"
+# ─── TestInstructResultParseBeforeAccess ───
+
+
+class TestInstructResultParseBeforeAccess:
+    """Test cases for lint_instruct_result_parse_before_access (KB1)."""
+
+    _HELPERS = (
+        "def _parse_instruct_result(thunk, model_class):\n"
+        "    return model_class.model_validate_json(thunk.value)\n"
+        "def _safe_parse_with_fallback(thunk, model_class, **fb):\n"
+        "    try: return model_class.model_validate_json(thunk.value)\n"
+        "    except Exception: return model_class(**fb)\n"
+    )
+
+    def test_passes_with_parse_instruct_result(self):
+        pipeline = self._HELPERS + (
+            "from mellea import start_session\n"
+            "from .schemas import Intent\n"
+            "def run_pipeline():\n"
+            "    with start_session('o','m') as m:\n"
+            "        thunk = m.instruct('go', format=Intent)\n"
+            "    intent = _parse_instruct_result(thunk, Intent)\n"
+            "    return intent.query_type\n"
+        )
         with tempfile.TemporaryDirectory() as tmp:
-            pkg = _make_package(Path(tmp), {"pipeline.py": content})
-            result = lint_validation_fn_not_called_directly(pkg)
+            pkg = _make_package(Path(tmp), {"pipeline.py": pipeline})
+            assert (
+                lint_instruct_result_parse_before_access(pkg).verdict == "pass"
+            )
+
+    def test_passes_with_safe_parse_with_fallback(self):
+        pipeline = self._HELPERS + (
+            "from mellea import start_session\n"
+            "from .schemas import Intent\n"
+            "def run_pipeline():\n"
+            "    with start_session('o','m') as m:\n"
+            "        thunk = m.instruct('go', format=Intent)\n"
+            "    intent = _safe_parse_with_fallback(thunk, Intent, query_type='x')\n"
+            "    return intent.query_type\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(Path(tmp), {"pipeline.py": pipeline})
+            assert (
+                lint_instruct_result_parse_before_access(pkg).verdict == "pass"
+            )
+
+    def test_passes_with_model_validate_json_value(self):
+        pipeline = self._HELPERS + (
+            "from mellea import start_session\n"
+            "from .schemas import Intent\n"
+            "def run_pipeline():\n"
+            "    with start_session('o','m') as m:\n"
+            "        thunk = m.instruct('go', format=Intent)\n"
+            "    parsed = Intent.model_validate_json(thunk.value)\n"
+            "    return parsed.query_type\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(Path(tmp), {"pipeline.py": pipeline})
+            assert (
+                lint_instruct_result_parse_before_access(pkg).verdict == "pass"
+            )
+
+    def test_fails_with_direct_field_access(self):
+        pipeline = (
+            "from mellea import start_session\n"
+            "from .schemas import Intent\n"
+            "def run_pipeline():\n"
+            "    with start_session('o','m') as m:\n"
+            "        thunk = m.instruct('go', format=Intent)\n"
+            "    return thunk.query_type\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(Path(tmp), {"pipeline.py": pipeline})
+            result = lint_instruct_result_parse_before_access(pkg)
+            assert result.verdict == "fail"
+            assert "thunk" in result.failures[0].message
+
+    def test_fails_with_model_dump_call(self):
+        pipeline = (
+            "from mellea import start_session\n"
+            "from .schemas import Intent\n"
+            "def run_pipeline():\n"
+            "    with start_session('o','m') as m:\n"
+            "        t = m.instruct('go', format=Intent)\n"
+            "    return t.model_dump()\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(Path(tmp), {"pipeline.py": pipeline})
+            result = lint_instruct_result_parse_before_access(pkg)
+            assert result.verdict == "fail"
+
+    def test_fails_with_parsed_repr_access(self):
+        pipeline = (
+            "from mellea import start_session\n"
+            "from .schemas import Intent\n"
+            "def run_pipeline():\n"
+            "    with start_session('o','m') as m:\n"
+            "        t = m.instruct('go', format=Intent)\n"
+            "    x = t.parsed_repr\n"
+            "    return x\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(Path(tmp), {"pipeline.py": pipeline})
+            assert (
+                lint_instruct_result_parse_before_access(pkg).verdict == "fail"
+            )
+
+    def test_passes_with_access_on_reassigned_parsed_var(self):
+        pipeline = self._HELPERS + (
+            "from mellea import start_session\n"
+            "from .schemas import Intent\n"
+            "def run_pipeline():\n"
+            "    with start_session('o','m') as m:\n"
+            "        thunk = m.instruct('go', format=Intent)\n"
+            "    parsed = _safe_parse_with_fallback(thunk, Intent, query_type='x')\n"
+            "    return parsed.query_type + parsed.location\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(Path(tmp), {"pipeline.py": pipeline})
+            assert (
+                lint_instruct_result_parse_before_access(pkg).verdict == "pass"
+            )
+
+    def test_untracks_thunk_after_rebind(self):
+        pipeline = (
+            "from mellea import start_session\n"
+            "from .schemas import Intent\n"
+            "def run_pipeline():\n"
+            "    with start_session('o','m') as m:\n"
+            "        thunk = m.instruct('go', format=Intent)\n"
+            "    thunk = {'query_type': 'x'}\n"
+            "    return thunk['query_type']\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(Path(tmp), {"pipeline.py": pipeline})
+            assert (
+                lint_instruct_result_parse_before_access(pkg).verdict == "pass"
+            )
+
+    def test_multi_function_scope_isolation(self):
+        pipeline = self._HELPERS + (
+            "from mellea import start_session\n"
+            "from .schemas import Intent\n"
+            "def fn_a():\n"
+            "    with start_session('o','m') as m:\n"
+            "        thunk = m.instruct('go', format=Intent)\n"
+            "    parsed = _parse_instruct_result(thunk, Intent)\n"
+            "    return parsed.query_type\n"
+            "def fn_b(thunk):\n"
+            "    return thunk.query_type\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(Path(tmp), {"pipeline.py": pipeline})
+            assert (
+                lint_instruct_result_parse_before_access(pkg).verdict == "pass"
+            )
+
+    def test_walks_slots_and_constrained_slots(self):
+        bad = (
+            "from mellea import start_session\n"
+            "from .schemas import S\n"
+            "def f():\n"
+            "    with start_session('o','m') as m:\n"
+            "        t = m.instruct('go', format=S)\n"
+            "    return t.x\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(
+                Path(tmp),
+                {"slots.py": bad, "constrained_slots.py": bad},
+            )
+            result = lint_instruct_result_parse_before_access(pkg)
+            assert result.verdict == "fail"
+
+    def test_skips_unparseable_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(
+                Path(tmp), {"pipeline.py": "def broken(:\n    pass\n"}
+            )
+            assert (
+                lint_instruct_result_parse_before_access(pkg).verdict == "pass"
+            )
+
+    def test_ignores_instruct_without_format_kwarg(self):
+        pipeline = (
+            "from mellea import start_session\n"
+            "def run_pipeline():\n"
+            "    with start_session('o','m') as m:\n"
+            "        thunk = m.instruct('classify the query')\n"
+            "    return thunk.value\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(Path(tmp), {"pipeline.py": pipeline})
+            assert (
+                lint_instruct_result_parse_before_access(pkg).verdict == "pass"
+            )
+
+
+# ─── TestFormatAnnotation ───
+
+
+class TestFormatAnnotation:
+    """Test cases for lint_format_annotation."""
+
+    def test_passes_with_format_and_model_validate_json(self):
+        pipeline = (
+            "from mellea import start_session\n"
+            "from .schemas import Intent\n"
+            "def run_pipeline():\n"
+            "    with start_session('o','m') as m:\n"
+            "        thunk = m.instruct('go', format=Intent)\n"
+            "    return Intent.model_validate_json(thunk.value)\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(Path(tmp), {"pipeline.py": pipeline})
+            assert lint_format_annotation(pkg).verdict == "pass"
+
+    def test_passes_with_format_and_parse_instruct_result(self):
+        pipeline = (
+            "from mellea import start_session\n"
+            "from .schemas import Intent\n"
+            "def run_pipeline():\n"
+            "    with start_session('o','m') as m:\n"
+            "        thunk = m.instruct('go', format=Intent)\n"
+            "    return _parse_instruct_result(thunk, Intent)\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(Path(tmp), {"pipeline.py": pipeline})
+            assert lint_format_annotation(pkg).verdict == "pass"
+
+    def test_passes_with_format_and_safe_parse_with_fallback(self):
+        pipeline = (
+            "from mellea import start_session\n"
+            "from .schemas import Intent\n"
+            "def run_pipeline():\n"
+            "    with start_session('o','m') as m:\n"
+            "        thunk = m.instruct('go', format=Intent)\n"
+            "    return _safe_parse_with_fallback(thunk, Intent, query_type='x')\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(Path(tmp), {"pipeline.py": pipeline})
+            assert lint_format_annotation(pkg).verdict == "pass"
+
+    def test_fails_when_model_validate_json_with_no_format(self):
+        pipeline = (
+            "from mellea import start_session\n"
+            "from .schemas import Intent\n"
+            "def run_pipeline():\n"
+            "    with start_session('o','m') as m:\n"
+            "        thunk = m.instruct('go')\n"
+            "    return Intent.model_validate_json(thunk.value)\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(Path(tmp), {"pipeline.py": pipeline})
+            result = lint_format_annotation(pkg)
+            assert result.verdict == "fail"
+            assert "thunk" in result.failures[0].message
+            assert "format=" in result.failures[0].message
+
+    def test_fails_when_parse_instruct_result_with_no_format(self):
+        pipeline = (
+            "from mellea import start_session\n"
+            "from .schemas import Intent\n"
+            "def run_pipeline():\n"
+            "    with start_session('o','m') as m:\n"
+            "        thunk = m.instruct('go')\n"
+            "    return _parse_instruct_result(thunk, Intent)\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(Path(tmp), {"pipeline.py": pipeline})
+            result = lint_format_annotation(pkg)
+            assert result.verdict == "fail"
+            assert "_parse_instruct_result" in result.failures[0].message
+
+    def test_fails_when_safe_parse_with_fallback_with_no_format(self):
+        pipeline = (
+            "from mellea import start_session\n"
+            "from .schemas import Intent\n"
+            "def run_pipeline():\n"
+            "    with start_session('o','m') as m:\n"
+            "        thunk = m.instruct('go')\n"
+            "    return _safe_parse_with_fallback(thunk, Intent, query_type='x')\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(Path(tmp), {"pipeline.py": pipeline})
+            result = lint_format_annotation(pkg)
+            assert result.verdict == "fail"
+            assert "_safe_parse_with_fallback" in result.failures[0].message
+
+    def test_passes_when_thunk_unused_with_no_format(self):
+        """No-format instruct whose result is never parsed is not this lint's concern."""
+        pipeline = (
+            "from mellea import start_session\n"
+            "def run_pipeline():\n"
+            "    with start_session('o','m') as m:\n"
+            "        thunk = m.instruct('classify the query')\n"
+            "    return thunk\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(Path(tmp), {"pipeline.py": pipeline})
+            assert lint_format_annotation(pkg).verdict == "pass"
+
+    def test_dedups_multiple_parse_uses_of_same_thunk(self):
+        """A single bad instruct used twice for parsing emits one failure, not two."""
+        pipeline = (
+            "from mellea import start_session\n"
+            "from .schemas import Intent\n"
+            "def run_pipeline():\n"
+            "    with start_session('o','m') as m:\n"
+            "        thunk = m.instruct('go')\n"
+            "    a = Intent.model_validate_json(thunk.value)\n"
+            "    b = _parse_instruct_result(thunk, Intent)\n"
+            "    return a, b\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(Path(tmp), {"pipeline.py": pipeline})
+            result = lint_format_annotation(pkg)
+            assert result.verdict == "fail"
+            assert len(result.failures) == 1
+
+    def test_walks_slots_and_constrained_slots(self):
+        bad = (
+            "from mellea import start_session\n"
+            "from .schemas import S\n"
+            "def f():\n"
+            "    with start_session('o','m') as m:\n"
+            "        t = m.instruct('go')\n"
+            "    return S.model_validate_json(t.value)\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(
+                Path(tmp),
+                {"slots.py": bad, "constrained_slots.py": bad},
+            )
+            result = lint_format_annotation(pkg)
+            assert result.verdict == "fail"
+            assert len(result.failures) == 2
+
+    def test_skips_unparseable_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(
+                Path(tmp), {"pipeline.py": "def broken(:\n    pass\n"}
+            )
+            assert lint_format_annotation(pkg).verdict == "pass"
+
+    def test_passes_when_no_pipeline_files_present(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(Path(tmp), {"main.py": "x = 1\n"})
+            result = lint_format_annotation(pkg)
+            assert result.verdict == "pass"
+            assert result.files_checked == 0
+
+
+# ─── TestSessionBoundary ───
+
+
+class TestSessionBoundary:
+    """Test cases for lint_session_boundary (KB5)."""
+
+    def test_passes_with_single_format_type(self):
+        pipeline = (
+            "from mellea import start_session\n"
+            "from .schemas import TriageVerdict\n"
+            "def run_pipeline(t: str) -> dict:\n"
+            "    with start_session('ollama', 'm') as m:\n"
+            "        v1 = m.instruct('Triage', format=TriageVerdict)\n"
+            "        v2 = m.instruct('Refine', format=TriageVerdict)\n"
+            "    return {}\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(Path(tmp), {"pipeline.py": pipeline})
+            assert lint_session_boundary(pkg).verdict == "pass"
+
+    def test_fails_with_two_format_types_in_one_session(self):
+        pipeline = (
+            "from mellea import start_session\n"
+            "from .schemas import A, B\n"
+            "def run_pipeline(t: str) -> dict:\n"
+            "    with start_session('o','m') as m:\n"
+            "        x = m.instruct('one', format=A)\n"
+            "        y = m.instruct('two', format=B)\n"
+            "    return {}\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(Path(tmp), {"pipeline.py": pipeline})
+            result = lint_session_boundary(pkg)
+            assert result.verdict == "fail"
+            assert len(result.failures) == 1
+            assert "A" in result.failures[0].message
+            assert "B" in result.failures[0].message
+
+    def test_passes_with_two_sessions_each_one_format(self):
+        pipeline = (
+            "from mellea import start_session\n"
+            "from .schemas import A, B\n"
+            "def f(x):\n"
+            "    with start_session('o','m') as m:\n"
+            "        a = m.instruct('1', format=A)\n"
+            "    with start_session('o','m') as m:\n"
+            "        b = m.instruct('2', format=B)\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(Path(tmp), {"pipeline.py": pipeline})
+            assert lint_session_boundary(pkg).verdict == "pass"
+
+    def test_passes_with_no_format_kwarg(self):
+        pipeline = (
+            "from mellea import start_session\n"
+            "def run_pipeline(q):\n"
+            "    with start_session('o','m') as m:\n"
+            "        return m.instruct('Answer')\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(Path(tmp), {"pipeline.py": pipeline})
+            assert lint_session_boundary(pkg).verdict == "pass"
+
+    def test_fails_with_three_distinct_format_types(self):
+        pipeline = (
+            "from mellea import start_session\n"
+            "from .schemas import A, B, C\n"
+            "def f(x):\n"
+            "    with start_session('o','m') as m:\n"
+            "        a = m.instruct('1', format=A)\n"
+            "        b = m.instruct('2', format=B)\n"
+            "        c = m.instruct('3', format=C)\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(Path(tmp), {"pipeline.py": pipeline})
+            result = lint_session_boundary(pkg)
             assert result.verdict == "fail"
             msg = result.failures[0].message
-            assert "req.validate" in msg
-            assert "ValueError" in msg
+            assert "A" in msg and "B" in msg and "C" in msg
+
+    def test_checks_slots_and_constrained_slots(self):
+        bad = (
+            "from mellea import start_session\n"
+            "from .schemas import A, B\n"
+            "def helper():\n"
+            "    with start_session('o','m') as m:\n"
+            "        m.instruct('x', format=A)\n"
+            "        m.instruct('y', format=B)\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(
+                Path(tmp),
+                {"slots.py": bad, "constrained_slots.py": bad},
+            )
+            result = lint_session_boundary(pkg)
+            assert result.verdict == "fail"
+            assert len(result.failures) == 2
+
+    def test_skips_unparseable_files(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(Path(tmp), {"pipeline.py": "def broken(:\n    pass\n"})
+            assert lint_session_boundary(pkg).verdict == "pass"
+
+    def test_passes_when_no_pipeline_files_present(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(Path(tmp), {"main.py": "x = 1\n"})
+            result = lint_session_boundary(pkg)
+            assert result.verdict == "pass"
+            assert result.files_checked == 0
 
 
 # ─── TestFixturePydanticCoercion ───
