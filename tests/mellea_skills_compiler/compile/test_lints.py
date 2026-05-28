@@ -300,6 +300,93 @@ class TestBundledAssetPathResolution:
                 f"{len(result.failures)}: {[f.message for f in result.failures]}"
             )
 
+    def test_passes_with_pkg_dir_alias_module_level(self):
+        """`pkg_dir = Path(__file__).parent; pkg_dir / 'references'` is a clean idiom."""
+        content = (
+            "from pathlib import Path\n"
+            "pkg_dir = Path(__file__).parent\n"
+            "references_dir = pkg_dir / 'references'\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(Path(tmp), {"loader.py": content})
+            result = lint_bundled_asset_path_resolution(pkg)
+            assert result.verdict == "pass", (
+                f"`pkg_dir = Path(__file__).parent` alias should make `pkg_dir / 'references'` "
+                f"pass; got failures: {[f.message for f in result.failures]}"
+            )
+
+    def test_passes_with_pkg_dir_alias_inside_function(self):
+        """Alias bound inside a function body must still be tracked."""
+        content = (
+            "from pathlib import Path\n"
+            "\n"
+            "def load_documents():\n"
+            "    pkg_dir = Path(__file__).parent\n"
+            "    references_dir = pkg_dir / 'references'\n"
+            "    return references_dir\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(Path(tmp), {"loader.py": content})
+            result = lint_bundled_asset_path_resolution(pkg)
+            assert result.verdict == "pass", (
+                f"In-function alias should be tracked; got failures: "
+                f"{[f.message for f in result.failures]}"
+            )
+
+    def test_passes_with_annotated_alias(self):
+        """`pkg_dir: Path = Path(__file__).parent` AnnAssign form."""
+        content = (
+            "from pathlib import Path\n"
+            "pkg_dir: Path = Path(__file__).parent\n"
+            "p = pkg_dir / 'assets' / 'x.png'\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(Path(tmp), {"tools.py": content})
+            assert lint_bundled_asset_path_resolution(pkg).verdict == "pass"
+
+    def test_passes_with_alias_for_os_path_join(self):
+        """`pkg_dir = Path(__file__).parent; os.path.join(pkg_dir, 'scripts', ...)`."""
+        content = (
+            "import os\n"
+            "from pathlib import Path\n"
+            "pkg_dir = Path(__file__).parent\n"
+            "p = os.path.join(pkg_dir, 'scripts', 'go.sh')\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(Path(tmp), {"tools.py": content})
+            assert lint_bundled_asset_path_resolution(pkg).verdict == "pass"
+
+    def test_fails_when_alias_bound_to_non_file_root(self):
+        """An alias to `os.getcwd()` or some other non-__file__ root should NOT be accepted."""
+        content = (
+            "import os\n"
+            "from pathlib import Path\n"
+            "pkg_dir = Path(os.getcwd())\n"
+            "p = pkg_dir / 'references' / 'doc.md'\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(Path(tmp), {"loader.py": content})
+            result = lint_bundled_asset_path_resolution(pkg)
+            assert result.verdict == "fail", (
+                f"Alias bound to a non-__file__ root must NOT be accepted; got "
+                f"verdict={result.verdict}"
+            )
+
+    def test_failure_message_mentions_alias_pattern(self):
+        """When the lint fails, the message hints that local aliases are accepted."""
+        content = (
+            "from pathlib import Path\n"
+            "p = Path('/tmp/whatever') / 'references' / 'x.md'\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(Path(tmp), {"tools.py": content})
+            result = lint_bundled_asset_path_resolution(pkg)
+            assert result.verdict == "fail"
+            msg = result.failures[0].message
+            assert "pkg_dir" in msg and "alias" in msg.lower(), (
+                f"Failure message should mention the alias workaround; got: {msg}"
+            )
+
 
 # ─── TestRuntimeDefaultsBound ───
 
