@@ -17,6 +17,7 @@ from typing import Dict
 
 from mellea_skills_compiler.compile.lints import (
     lint_bundled_asset_path_resolution,
+    lint_fixture_pydantic_coercion,
     lint_fixtures_loader_contract,
     lint_runtime_defaults_bound,
     lint_session_method_arity,
@@ -786,3 +787,273 @@ class TestValidationFnNotCalledDirectly:
             msg = result.failures[0].message
             assert "req.validate" in msg
             assert "ValueError" in msg
+
+
+# ─── TestFixturePydanticCoercion ───
+
+
+_SCHEMAS_PY = (
+    "from pydantic import BaseModel\n"
+    "from typing import Optional\n"
+    "\n"
+    "class IntakeContext(BaseModel):\n"
+    "    sport: str\n"
+    "    institution: str\n"
+    "\n"
+    "class ReviewMemorandum(BaseModel):\n"
+    "    findings: list[str]\n"
+)
+
+_PIPELINE_WITH_PYDANTIC_PARAM = (
+    "from .schemas import IntakeContext, ReviewMemorandum\n"
+    "from typing import Optional\n"
+    "\n"
+    "def run_pipeline(contract_text: str, intake: IntakeContext) -> ReviewMemorandum:\n"
+    "    return ReviewMemorandum(findings=[intake.sport])\n"
+)
+
+_PIPELINE_WITHOUT_PYDANTIC_PARAM = (
+    "def run_pipeline(user_query: str) -> str:\n"
+    "    return user_query\n"
+)
+
+
+class TestFixturePydanticCoercion:
+    """Test cases for lint_fixture_pydantic_coercion."""
+
+    def test_bare_dict_for_pydantic_param_fails_nil_contract_reproducer(self):
+        """The exact nil-contract bug: fixture passes intake as a bare dict."""
+        fixture = (
+            'def make_x():\n'
+            '    inputs = {\n'
+            '        "contract_text": "txt",\n'
+            '        "intake": {"sport": "Football", "institution": "U.Fla"},\n'
+            '    }\n'
+            '    return inputs, "x", "desc"\n'
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(
+                Path(tmp),
+                {
+                    "schemas.py": _SCHEMAS_PY,
+                    "pipeline.py": _PIPELINE_WITH_PYDANTIC_PARAM,
+                    "fixtures/__init__.py": "ALL_FIXTURES = []\n",
+                    "fixtures/x.py": fixture,
+                },
+            )
+            result = lint_fixture_pydantic_coercion(pkg)
+            assert result.verdict == "fail"
+            assert len(result.failures) == 1
+            assert "intake" in result.failures[0].message
+            assert "IntakeContext" in result.failures[0].message
+
+    def test_model_constructor_call_passes(self):
+        fixture = (
+            'def make_x():\n'
+            '    inputs = {\n'
+            '        "contract_text": "txt",\n'
+            '        "intake": IntakeContext(**{"sport": "F", "institution": "U"}),\n'
+            '    }\n'
+            '    return inputs, "x", "desc"\n'
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(
+                Path(tmp),
+                {
+                    "schemas.py": _SCHEMAS_PY,
+                    "pipeline.py": _PIPELINE_WITH_PYDANTIC_PARAM,
+                    "fixtures/__init__.py": "ALL_FIXTURES = []\n",
+                    "fixtures/x.py": fixture,
+                },
+            )
+            assert lint_fixture_pydantic_coercion(pkg).verdict == "pass"
+
+    def test_variable_reference_passes(self):
+        fixture = (
+            'def make_x():\n'
+            '    ctx = IntakeContext(sport="F", institution="U")\n'
+            '    inputs = {"contract_text": "txt", "intake": ctx}\n'
+            '    return inputs, "x", "desc"\n'
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(
+                Path(tmp),
+                {
+                    "schemas.py": _SCHEMAS_PY,
+                    "pipeline.py": _PIPELINE_WITH_PYDANTIC_PARAM,
+                    "fixtures/__init__.py": "ALL_FIXTURES = []\n",
+                    "fixtures/x.py": fixture,
+                },
+            )
+            assert lint_fixture_pydantic_coercion(pkg).verdict == "pass"
+
+    def test_non_pydantic_param_dict_value_ignored(self):
+        fixture = (
+            'def make_x():\n'
+            '    inputs = {"user_query": "hello"}\n'
+            '    return inputs, "x", "desc"\n'
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(
+                Path(tmp),
+                {
+                    "pipeline.py": _PIPELINE_WITHOUT_PYDANTIC_PARAM,
+                    "fixtures/__init__.py": "ALL_FIXTURES = []\n",
+                    "fixtures/x.py": fixture,
+                },
+            )
+            assert lint_fixture_pydantic_coercion(pkg).verdict == "pass"
+
+    def test_optional_pydantic_param_dict_value_fails(self):
+        pipeline = (
+            "from .schemas import IntakeContext, ReviewMemorandum\n"
+            "from typing import Optional\n"
+            "\n"
+            "def run_pipeline(intake: Optional[IntakeContext] = None) -> str:\n"
+            "    return intake.sport if intake else ''\n"
+        )
+        fixture = (
+            'def make_x():\n'
+            '    inputs = {"intake": {"sport": "F", "institution": "U"}}\n'
+            '    return inputs, "x", "desc"\n'
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(
+                Path(tmp),
+                {
+                    "schemas.py": _SCHEMAS_PY,
+                    "pipeline.py": pipeline,
+                    "fixtures/__init__.py": "ALL_FIXTURES = []\n",
+                    "fixtures/x.py": fixture,
+                },
+            )
+            assert lint_fixture_pydantic_coercion(pkg).verdict == "fail"
+
+    def test_pipe_or_none_pydantic_param_dict_value_fails(self):
+        pipeline = (
+            "from .schemas import IntakeContext, ReviewMemorandum\n"
+            "\n"
+            "def run_pipeline(intake: IntakeContext | None = None) -> str:\n"
+            "    return intake.sport if intake else ''\n"
+        )
+        fixture = (
+            'def make_x():\n'
+            '    inputs = {"intake": {"sport": "F", "institution": "U"}}\n'
+            '    return inputs, "x", "desc"\n'
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(
+                Path(tmp),
+                {
+                    "schemas.py": _SCHEMAS_PY,
+                    "pipeline.py": pipeline,
+                    "fixtures/__init__.py": "ALL_FIXTURES = []\n",
+                    "fixtures/x.py": fixture,
+                },
+            )
+            assert lint_fixture_pydantic_coercion(pkg).verdict == "fail"
+
+    def test_transitive_pydantic_subclass_detected(self):
+        schemas = (
+            "from pydantic import BaseModel\n"
+            "class Foo(BaseModel):\n"
+            "    a: str\n"
+            "class Bar(Foo):\n"
+            "    b: str\n"
+        )
+        pipeline = (
+            "from .schemas import Bar\n"
+            "def run_pipeline(bar: Bar) -> str:\n"
+            "    return bar.a\n"
+        )
+        fixture = (
+            'def make_x():\n'
+            '    inputs = {"bar": {"a": "x", "b": "y"}}\n'
+            '    return inputs, "x", "desc"\n'
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(
+                Path(tmp),
+                {
+                    "schemas.py": schemas,
+                    "pipeline.py": pipeline,
+                    "fixtures/__init__.py": "ALL_FIXTURES = []\n",
+                    "fixtures/x.py": fixture,
+                },
+            )
+            assert lint_fixture_pydantic_coercion(pkg).verdict == "fail"
+
+    def test_pipeline_missing_returns_skipped(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = Path(tmp)
+            (pkg / "fixtures").mkdir()
+            (pkg / "fixtures" / "__init__.py").write_text("ALL_FIXTURES = []\n")
+            result = lint_fixture_pydantic_coercion(pkg)
+            assert result.verdict == "skipped"
+            assert "pipeline.py" in (result.skipped_reason or "")
+
+    def test_fixtures_dir_missing_returns_skipped(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(
+                Path(tmp),
+                {"pipeline.py": _PIPELINE_WITHOUT_PYDANTIC_PARAM},
+            )
+            result = lint_fixture_pydantic_coercion(pkg)
+            assert result.verdict == "skipped"
+
+    def test_schemas_missing_no_false_positive(self):
+        fixture = (
+            'def make_x():\n'
+            '    inputs = {"intake": {"sport": "F"}}\n'
+            '    return inputs, "x", "desc"\n'
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(
+                Path(tmp),
+                {
+                    "pipeline.py": _PIPELINE_WITH_PYDANTIC_PARAM,
+                    "fixtures/__init__.py": "ALL_FIXTURES = []\n",
+                    "fixtures/x.py": fixture,
+                },
+            )
+            assert lint_fixture_pydantic_coercion(pkg).verdict == "pass"
+
+    def test_syntax_error_in_fixture_silently_skipped(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(
+                Path(tmp),
+                {
+                    "schemas.py": _SCHEMAS_PY,
+                    "pipeline.py": _PIPELINE_WITH_PYDANTIC_PARAM,
+                    "fixtures/__init__.py": "ALL_FIXTURES = []\n",
+                    "fixtures/x.py": "def broken(:\n    pass\n",
+                },
+            )
+            assert lint_fixture_pydantic_coercion(pkg).verdict == "pass"
+
+    def test_multiple_fixtures_mixed_results(self):
+        good = (
+            'def make_g():\n'
+            '    inputs = {"intake": IntakeContext(sport="F", institution="U")}\n'
+            '    return inputs, "g", "desc"\n'
+        )
+        bad = (
+            'def make_b():\n'
+            '    inputs = {"intake": {"sport": "F", "institution": "U"}}\n'
+            '    return inputs, "b", "desc"\n'
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = _make_package(
+                Path(tmp),
+                {
+                    "schemas.py": _SCHEMAS_PY,
+                    "pipeline.py": _PIPELINE_WITH_PYDANTIC_PARAM,
+                    "fixtures/__init__.py": "ALL_FIXTURES = []\n",
+                    "fixtures/g.py": good,
+                    "fixtures/b.py": bad,
+                },
+            )
+            result = lint_fixture_pydantic_coercion(pkg)
+            assert result.verdict == "fail"
+            assert len(result.failures) == 1
+            assert result.failures[0].file == "fixtures/b.py"

@@ -541,6 +541,193 @@ def lint_validation_fn_not_called_directly(package_dir: Path) -> LintResult:
     return result
 
 
+# ─── Lint: fixture-pydantic-coercion ───
+#
+# Cross-file check: fixture inputs must not pass bare dict literals where
+# ``run_pipeline``'s signature declares a Pydantic-typed parameter. The
+# fixture-shape mismatch raises ``AttributeError: 'dict' object has no
+# attribute '<field>'`` at smoke-check time.
+#
+# Detection-only. The durable structural fix lives in the fixtures writer
+# (have it emit ``Model(**{...})`` instead of raw ``{...}``); that's
+# tracked separately.
+
+
+def _find_pydantic_classes_in_schemas(schemas_py: Path) -> set:
+    """Return names of classes in schemas.py that transitively subclass BaseModel."""
+    if not schemas_py.is_file():
+        return set()
+    try:
+        tree = ast.parse(schemas_py.read_text())
+    except SyntaxError:
+        return set()
+
+    pydantic: set = set()
+
+    def _base_is_pydantic(base: ast.expr) -> bool:
+        if isinstance(base, ast.Name):
+            return base.id == "BaseModel" or base.id in pydantic
+        if isinstance(base, ast.Attribute) and base.attr == "BaseModel":
+            return True
+        return False
+
+    changed = True
+    while changed:
+        changed = False
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ClassDef) or node.name in pydantic:
+                continue
+            if any(_base_is_pydantic(b) for b in node.bases):
+                pydantic.add(node.name)
+                changed = True
+    return pydantic
+
+
+def _resolve_pydantic_annotation(node: ast.expr, pydantic_classes: set) -> Optional[str]:
+    """Return the Pydantic class name if ``node`` annotates a Pydantic-typed param.
+
+    Handles: ``Foo``, ``Optional[Foo]``, ``Foo | None``.
+    """
+    if isinstance(node, ast.Name):
+        return node.id if node.id in pydantic_classes else None
+    if isinstance(node, ast.Subscript):
+        outer = node.value
+        if isinstance(outer, ast.Name) and outer.id == "Optional":
+            return _resolve_pydantic_annotation(node.slice, pydantic_classes)
+        return None
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
+        left = _resolve_pydantic_annotation(node.left, pydantic_classes)
+        right = _resolve_pydantic_annotation(node.right, pydantic_classes)
+        return left or right
+    return None
+
+
+def _pydantic_typed_run_pipeline_params(
+    pipeline_py: Path, pydantic_classes: set
+) -> dict:
+    """Return ``{param_name: pydantic_class}`` for run_pipeline params typed as Pydantic."""
+    if not pipeline_py.is_file():
+        return {}
+    try:
+        tree = ast.parse(pipeline_py.read_text())
+    except SyntaxError:
+        return {}
+
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.FunctionDef) or node.name != "run_pipeline":
+            continue
+        params: dict = {}
+        for arg in node.args.args:
+            if arg.annotation is None:
+                continue
+            cls = _resolve_pydantic_annotation(arg.annotation, pydantic_classes)
+            if cls is not None:
+                params[arg.arg] = cls
+        return params
+    return {}
+
+
+def _check_fixture_inputs(
+    fixture_py: Path, pydantic_params: dict
+) -> List[Tuple[str, Optional[int], Optional[int], str]]:
+    """Walk a fixture .py file; return (param_name, line, col, model_class) violations."""
+    if not fixture_py.is_file():
+        return []
+    try:
+        tree = ast.parse(fixture_py.read_text())
+    except SyntaxError:
+        return []
+
+    violations: List[Tuple[str, Optional[int], Optional[int], str]] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Assign):
+            continue
+        if not (
+            len(node.targets) == 1
+            and isinstance(node.targets[0], ast.Name)
+            and node.targets[0].id == "inputs"
+            and isinstance(node.value, ast.Dict)
+        ):
+            continue
+        for k_node, v_node in zip(node.value.keys, node.value.values):
+            if not (isinstance(k_node, ast.Constant) and isinstance(k_node.value, str)):
+                continue
+            param_name = k_node.value
+            if param_name not in pydantic_params:
+                continue
+            if isinstance(v_node, ast.Dict):
+                violations.append(
+                    (
+                        param_name,
+                        getattr(v_node, "lineno", None),
+                        getattr(v_node, "col_offset", None),
+                        pydantic_params[param_name],
+                    )
+                )
+    return violations
+
+
+def lint_fixture_pydantic_coercion(package_dir: Path) -> LintResult:
+    """Fixture inputs must not pass bare dicts where run_pipeline expects Pydantic models."""
+    result = LintResult(lint_id="fixture-pydantic-coercion", verdict="pass")
+
+    pipeline_py = package_dir / "pipeline.py"
+    schemas_py = package_dir / "schemas.py"
+    fixtures_dir = package_dir / "fixtures"
+
+    if not pipeline_py.is_file():
+        result.verdict = "skipped"
+        result.skipped_reason = "pipeline.py not found"
+        return result
+    if not fixtures_dir.is_dir():
+        result.verdict = "skipped"
+        result.skipped_reason = "fixtures/ directory not found"
+        return result
+
+    pydantic_classes = _find_pydantic_classes_in_schemas(schemas_py)
+    pydantic_params = _pydantic_typed_run_pipeline_params(pipeline_py, pydantic_classes)
+
+    if not pydantic_params:
+        return result
+
+    fixture_files = sorted(
+        p for p in fixtures_dir.glob("*.py") if p.name != "__init__.py"
+    )
+    result.files_checked = len(fixture_files)
+
+    for fixture_py in fixture_files:
+        for param_name, line, col, model_class in _check_fixture_inputs(
+            fixture_py, pydantic_params
+        ):
+            result.failures.append(
+                LintFailure(
+                    file=f"fixtures/{fixture_py.name}",
+                    line=line,
+                    column=col,
+                    message=(
+                        f"Fixture passes `{param_name}=<bare dict>` but "
+                        f"`run_pipeline.{param_name}` is typed as "
+                        f"`{model_class}` (Pydantic). At smoke-check time "
+                        f"the first attribute access on `{param_name}` "
+                        f"raises `AttributeError: 'dict' object has no "
+                        f"attribute ...`. Fix either side: (a) construct "
+                        f"the model in the fixture — "
+                        f"`'{param_name}': {model_class}(**{{...}})`; "
+                        f"(b) coerce at the pipeline entry — "
+                        f"`if isinstance({param_name}, dict): "
+                        f"{param_name} = {model_class}(**{param_name})`. "
+                        f"The durable structural fix is writer-side "
+                        f"(see lint header comment)."
+                    ),
+                    rule_ref="fixture-pydantic-coercion",
+                )
+            )
+
+    if result.failures:
+        result.verdict = "fail"
+    return result
+
+
 # ─── Runner ───
 
 
@@ -550,6 +737,7 @@ ALL_LINTS: Tuple[Callable[[Path], LintResult], ...] = (
     lint_runtime_defaults_bound,
     lint_session_method_arity,
     lint_validation_fn_not_called_directly,
+    lint_fixture_pydantic_coercion,
 )
 
 
