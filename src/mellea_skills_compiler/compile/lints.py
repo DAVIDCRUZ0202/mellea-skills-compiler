@@ -44,7 +44,7 @@ class LintFailure:
 @dataclass
 class LintResult:
     lint_id: str
-    verdict: str  # "pass" | "fail" | "skipped"
+    verdict: str  # "pass" | "fail" | "skipped" | "warning"
     files_checked: int = 0
     skipped_reason: Optional[str] = None
     failures: List[LintFailure] = field(default_factory=list)
@@ -1303,6 +1303,574 @@ def lint_fixture_pydantic_coercion(package_dir: Path) -> LintResult:
 
 
 
+# ─── Lint: grounding-context-types ───
+#
+# Mellea's backend walks `m.instruct(grounding_context=...)` dict values
+# and expects each value to be a CBlock, Component, or ModelOutputThunk
+# (in practice: a string that gets wrapped). Anything else — a list, a
+# dict, a list-of-dicts produced by `[obj.model_dump() for obj in ...]`
+# — crashes at runtime with:
+#
+#     ValueError: parts should only contain CBlocks, Components, or
+#     ModelOutputThunks; found `[{...}]` (type: <class 'list'>)
+#
+# Two severity tiers:
+#   - Definite collections (literal `[...]`, `{...}`, `(...)`, comprehensions)
+#     → hard `fail` (deterministic runtime crash).
+#   - Ambiguous (`Name`, `Attribute`, arbitrary expressions) → `warning`
+#     (advisory; the value MAY be a string at runtime, the lint can't tell).
+
+
+_GROUNDING_CTX_FILES: Tuple[str, ...] = (
+    "pipeline.py",
+    "slots.py",
+    "constrained_slots.py",
+)
+
+# AST node types whose VALUE is guaranteed-not-a-string at runtime. These
+# crash deterministically.
+_DEFINITE_COLLECTION_NODE_TYPES: Tuple[type, ...] = (
+    ast.List,
+    ast.Dict,
+    ast.Set,
+    ast.Tuple,
+    ast.ListComp,
+    ast.DictComp,
+    ast.SetComp,
+    ast.GeneratorExp,
+)
+
+
+def _is_str_call(node: ast.AST) -> bool:
+    """True iff `node` is a `str(...)` Call expression."""
+    if not isinstance(node, ast.Call):
+        return False
+    func = node.func
+    if isinstance(func, ast.Name) and func.id == "str":
+        return True
+    return False
+
+
+def _grounding_value_kind(value: ast.expr) -> str:
+    """Classify a single grounding_context dict-value AST node.
+
+    Returns:
+      - "ok"          — string literal, f-string, or `str(...)` call
+      - "definite"    — guaranteed-collection type that crashes at runtime
+      - "ambiguous"   — Name / Attribute / other expression that *might* be
+                        a string at runtime but the lint can't tell
+    """
+    if isinstance(value, ast.Constant) and isinstance(value.value, str):
+        return "ok"
+    if isinstance(value, ast.JoinedStr):  # f-string
+        return "ok"
+    if _is_str_call(value):
+        return "ok"
+    if isinstance(value, _DEFINITE_COLLECTION_NODE_TYPES):
+        return "definite"
+    return "ambiguous"
+
+
+def lint_grounding_context_types(package_dir: Path) -> LintResult:
+    """Every `grounding_context=` dict-literal value should be a string.
+
+    Verdict:
+      - `fail` if any definite-collection violation
+      - `warning` if only ambiguous findings
+      - `pass` otherwise
+    """
+    result = LintResult(lint_id="grounding-context-types", verdict="pass")
+
+    files_to_check: List[Path] = []
+    for fname in _GROUNDING_CTX_FILES:
+        p = package_dir / fname
+        if p.exists():
+            files_to_check.append(p)
+    result.files_checked = len(files_to_check)
+
+    has_definite = False
+    has_ambiguous = False
+
+    for py_file in files_to_check:
+        rel = py_file.relative_to(package_dir).as_posix()
+        try:
+            tree = ast.parse(py_file.read_text(), filename=str(py_file))
+        except SyntaxError:
+            continue
+
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            for kw in node.keywords:
+                if kw.arg != "grounding_context":
+                    continue
+                if not isinstance(kw.value, ast.Dict):
+                    continue
+                for key_node, value_node in zip(kw.value.keys, kw.value.values):
+                    kind = _grounding_value_kind(value_node)
+                    if kind == "ok":
+                        continue
+                    key_label = (
+                        repr(key_node.value)
+                        if isinstance(key_node, ast.Constant)
+                        else "<dynamic-key>"
+                    )
+                    line = getattr(value_node, "lineno", None) or getattr(
+                        node, "lineno", None
+                    )
+                    column = getattr(value_node, "col_offset", None)
+                    if kind == "definite":
+                        has_definite = True
+                        result.failures.append(
+                            LintFailure(
+                                file=rel,
+                                line=line,
+                                column=column,
+                                message=(
+                                    f"grounding_context key {key_label} has a "
+                                    f"collection-literal value (list, dict, "
+                                    f"tuple, set, or comprehension). Mellea's "
+                                    f"backend walks grounding_context values "
+                                    f"and expects each to be a CBlock / "
+                                    f"Component / ModelOutputThunk — in "
+                                    f"practice, a string. Collection-literal "
+                                    f"values crash at m.instruct() with "
+                                    f"`ValueError: parts should only contain "
+                                    f"CBlocks, Components, or "
+                                    f"ModelOutputThunks; found <list>`. Fix: "
+                                    f"wrap with `str(...)`, e.g. "
+                                    f"`{key_label}: str([r.model_dump() for r "
+                                    f"in risks])`."
+                                ),
+                                rule_ref="grounding-context-types (hard, collection literal)",
+                            )
+                        )
+                    else:  # ambiguous
+                        has_ambiguous = True
+                        result.failures.append(
+                            LintFailure(
+                                file=rel,
+                                line=line,
+                                column=column,
+                                message=(
+                                    f"grounding_context key {key_label} has a "
+                                    f"non-string-literal value (Name, "
+                                    f"Attribute, or other expression). It "
+                                    f"may be a string at runtime, but the "
+                                    f"lint cannot verify. To be safe and "
+                                    f"explicit, wrap with `str(...)` — e.g. "
+                                    f"`{key_label}: str(<expr>)`."
+                                ),
+                                rule_ref="grounding-context-types (advisory, ambiguous)",
+                            )
+                        )
+
+    if has_definite:
+        result.verdict = "fail"
+    elif has_ambiguous:
+        result.verdict = "warning"
+    return result
+
+
+# ─── Lint: stdlib-arg-types ───
+#
+# A Mellea API kwarg with a dict annotation receives a clearly-non-dict
+# argument, crashing at runtime with:
+#
+#     AttributeError: '<TypeName>' object has no attribute 'items'
+#
+# Narrow first version: focuses on `grounding_context=` on the Mellea
+# session `instruct`/`chat`/`act` family — that's where the observed
+# runtime crashes happen. Broader Mellea-kwarg coverage is a follow-up.
+#
+# Detection: walk function defs, record each param's annotation, then
+# walk Call nodes inside the function for `grounding_context=` kwargs.
+# Flag when the value is provably non-dict: a non-dict Constant, an
+# f-string, or a Name pointing to a function parameter with a provably
+# non-dict annotation. Ambiguous cases (no annotation, `Any`, unions
+# containing dict, attribute access, arbitrary call) are skipped — the
+# lint surfaces only statically-provable misuse.
+
+
+_STDLIB_ARG_TYPES_FILES: Tuple[str, ...] = (
+    "pipeline.py",
+    "slots.py",
+    "requirements.py",
+    "constrained_slots.py",
+    "tools.py",
+)
+
+_GROUNDING_CONTEXT_METHODS: frozenset = frozenset({
+    "instruct",
+    "chat",
+    "act",
+    "ainstruct",
+    "achat",
+    "aact",
+})
+
+_DICT_FAMILY_BASES: frozenset = frozenset({
+    "dict",
+    "Dict",
+    "Mapping",
+    "MutableMapping",
+    "OrderedDict",
+    "DefaultDict",
+})
+
+
+def _annotation_is_dict_family(node: Optional[ast.expr]) -> Optional[bool]:
+    """Classify a parameter annotation expression.
+
+    Returns:
+      * ``True``  — annotation IS dict-family (``dict``, ``dict[str, X]``,
+        ``Mapping``, etc.).
+      * ``False`` — annotation is provably NOT dict-family.
+      * ``None``  — annotation is missing / ambiguous (``Any``, unions
+        containing dict, generic ``object``, no annotation at all).
+    """
+    if node is None:
+        return None
+    if isinstance(node, ast.Name):
+        if node.id in _DICT_FAMILY_BASES:
+            return True
+        if node.id == "Any" or node.id == "object":
+            return None
+        return False
+    if isinstance(node, ast.Subscript):
+        base = node.value
+        if isinstance(base, ast.Name):
+            if base.id in _DICT_FAMILY_BASES:
+                return True
+            if base.id in {"Optional", "Union"}:
+                return None
+            return False
+        return None
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
+        return None
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        if node.value in _DICT_FAMILY_BASES:
+            return True
+        return False
+    return None
+
+
+def _classify_grounding_context_arg(
+    value: ast.expr, param_annotations: Dict[str, ast.expr]
+) -> Optional[str]:
+    """Classify a single ``grounding_context=<expr>`` argument value.
+
+    Returns:
+      * ``"non_dict_literal"`` — value is a non-dict Constant or f-string.
+      * ``"non_dict_param"``   — value is a Name pointing to a function
+        parameter whose annotation is provably non-dict.
+      * ``None`` — dict-shape or statically ambiguous.
+    """
+    if isinstance(value, ast.Dict):
+        return None
+    if isinstance(value, ast.Call) and isinstance(value.func, ast.Name) and value.func.id == "dict":
+        return None
+    if isinstance(value, ast.Call) and isinstance(value.func, ast.Name) and value.func.id in _DICT_FAMILY_BASES:
+        return None
+    if isinstance(value, ast.Constant) and not isinstance(value.value, dict):
+        if value.value is None:
+            # `grounding_context=None` is treated as empty dict by some
+            # Mellea versions; ambiguous wrt API, don't flag.
+            return None
+        return "non_dict_literal"
+    if isinstance(value, ast.JoinedStr):
+        return "non_dict_literal"
+    if isinstance(value, ast.Name):
+        annotation = param_annotations.get(value.id)
+        if annotation is not None:
+            classification = _annotation_is_dict_family(annotation)
+            if classification is False:
+                return "non_dict_param"
+    return None
+
+
+def _collect_function_param_annotations(
+    func: ast.AST,
+) -> Dict[str, ast.expr]:
+    """Map each parameter name → its annotation AST node (or skip if
+    no annotation)."""
+    out: Dict[str, ast.expr] = {}
+    args = func.args
+    for arg in (*args.posonlyargs, *args.args, *args.kwonlyargs):
+        if arg.annotation is not None:
+            out[arg.arg] = arg.annotation
+    if args.vararg and args.vararg.annotation is not None:
+        out[args.vararg.arg] = args.vararg.annotation
+    if args.kwarg and args.kwarg.annotation is not None:
+        out[args.kwarg.arg] = args.kwarg.annotation
+    return out
+
+
+def lint_stdlib_arg_types(package_dir: Path) -> LintResult:
+    """Flag clearly-non-dict arguments passed to Mellea API ``grounding_context=`` kwargs.
+
+    Narrow MVP scope: only checks ``grounding_context=`` on session-method
+    calls in the ``instruct``/``chat``/``act`` family.
+    """
+    result = LintResult(lint_id="stdlib-arg-types", verdict="pass")
+
+    files_to_check: List[Path] = []
+    for fname in _STDLIB_ARG_TYPES_FILES:
+        p = package_dir / fname
+        if p.exists():
+            files_to_check.append(p)
+    result.files_checked = len(files_to_check)
+
+    for py_file in files_to_check:
+        rel = py_file.relative_to(package_dir).as_posix()
+        try:
+            tree = ast.parse(py_file.read_text(), filename=str(py_file))
+        except SyntaxError:
+            continue
+
+        for func in ast.walk(tree):
+            if not isinstance(func, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            annotations = _collect_function_param_annotations(func)
+
+            for node in ast.walk(func):
+                if not isinstance(node, ast.Call):
+                    continue
+                if not isinstance(node.func, ast.Attribute):
+                    continue
+                method_name = node.func.attr
+                if method_name not in _GROUNDING_CONTEXT_METHODS:
+                    continue
+                for kw in node.keywords:
+                    if kw.arg != "grounding_context":
+                        continue
+                    classification = _classify_grounding_context_arg(
+                        kw.value, annotations
+                    )
+                    if classification is None:
+                        continue
+                    if classification == "non_dict_literal":
+                        msg = (
+                            f"`{method_name}(...)` call passes a "
+                            f"non-dict literal as `grounding_context=`. "
+                            f"Mellea iterates this argument with "
+                            f"`.items()` — a string/int/list/bool "
+                            f"argument crashes at runtime with "
+                            f"`AttributeError: '<type>' object has no "
+                            f"attribute 'items'`. Pass an actual dict, "
+                            f"e.g. `grounding_context={{}}` or "
+                            f"`grounding_context={{...}}`."
+                        )
+                    else:  # non_dict_param
+                        param_ref = (
+                            ast.unparse(kw.value)
+                            if hasattr(ast, "unparse")
+                            else getattr(kw.value, "id", "<expr>")
+                        )
+                        msg = (
+                            f"`{method_name}(...)` call passes "
+                            f"`grounding_context={param_ref}` where "
+                            f"`{param_ref}` is a function parameter "
+                            f"annotated with a non-dict type. Mellea "
+                            f"iterates the argument with `.items()` and "
+                            f"crashes with `AttributeError: '<type>' "
+                            f"object has no attribute 'items'` at "
+                            f"runtime. Either change the parameter "
+                            f"annotation to a dict-family type, OR "
+                            f"convert the value at the call site (e.g. "
+                            f"`grounding_context={param_ref}.model_dump()`"
+                            f" for a Pydantic model, or "
+                            f"`grounding_context={{'key': str({param_ref})}}`"
+                            f")."
+                        )
+                    result.failures.append(
+                        LintFailure(
+                            file=rel,
+                            line=getattr(node, "lineno", None),
+                            column=getattr(node, "col_offset", None),
+                            message=msg,
+                            rule_ref="stdlib-arg-types",
+                        )
+                    )
+
+    if result.failures:
+        result.verdict = "fail"
+    return result
+
+
+# ─── Lint: prefix-persona (KB7) ───
+#
+# `m.instruct(prefix=<config_constant>)` is misuse: `prefix=` is for
+# structured-output continuation (e.g. `prefix='{"result":"'`), not
+# persona injection. Use `model_options={ModelOption.SYSTEM_PROMPT: ...}`
+# instead. We flag bare Name expressions (config constants and
+# uppercase-name candidates); plain string literals are accepted as a
+# valid continuation prefix.
+
+
+_PREFIX_PERSONA_LINT_FILES: Tuple[str, ...] = (
+    "pipeline.py",
+    "slots.py",
+    "constrained_slots.py",
+)
+
+
+def _collect_config_constant_names(package_dir: Path) -> Set[str]:
+    """Return the set of top-level constant names defined in `<package>/config.py`."""
+    config_path = package_dir / "config.py"
+    if not config_path.exists():
+        return set()
+    try:
+        tree = ast.parse(config_path.read_text(), filename=str(config_path))
+    except SyntaxError:
+        return set()
+    names: Set[str] = set()
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    names.add(target.id)
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            names.add(node.target.id)
+    return names
+
+
+def _collect_names_imported_from_config(tree: ast.AST) -> Set[str]:
+    """Return names brought in via `from config import X` or `from .config import X`."""
+    names: Set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ImportFrom):
+            continue
+        module = node.module or ""
+        if module == "config" or module.endswith(".config"):
+            for alias in node.names:
+                names.add(alias.asname or alias.name)
+    return names
+
+
+def _is_instruct_attribute_call(node: ast.AST) -> bool:
+    """True iff node is an `<x>.instruct(...)` Call (any receiver)."""
+    if not isinstance(node, ast.Call):
+        return False
+    func = node.func
+    return isinstance(func, ast.Attribute) and func.attr == "instruct"
+
+
+def lint_prefix_persona(package_dir: Path) -> LintResult:
+    """`m.instruct(prefix=<config_constant>)` is misuse (KB7).
+
+    `prefix=` is for structured-output continuation; not for persona /
+    system-prompt injection.
+    """
+    result = LintResult(lint_id="prefix-persona", verdict="pass")
+
+    config_constants = _collect_config_constant_names(package_dir)
+
+    files_to_check: List[Path] = []
+    for fname in _PREFIX_PERSONA_LINT_FILES:
+        p = package_dir / fname
+        if p.exists():
+            files_to_check.append(p)
+    result.files_checked = len(files_to_check)
+
+    for py_file in files_to_check:
+        rel = py_file.relative_to(package_dir).as_posix()
+        try:
+            tree = ast.parse(py_file.read_text(), filename=str(py_file))
+        except SyntaxError:
+            continue
+
+        config_imported = _collect_names_imported_from_config(tree)
+
+        for node in ast.walk(tree):
+            if not _is_instruct_attribute_call(node):
+                continue
+            for kw in node.keywords:
+                if kw.arg != "prefix":
+                    continue
+                if isinstance(kw.value, ast.Constant) and isinstance(
+                    kw.value.value, str
+                ):
+                    continue
+                if isinstance(kw.value, ast.Name):
+                    name = kw.value.id
+                    is_config_const = name in config_constants
+                    is_config_import = name in config_imported
+                    provenance = (
+                        " (defined in config.py)"
+                        if is_config_const
+                        else (
+                            " (imported from config)"
+                            if is_config_import
+                            else " (looks like a config constant — uppercase Name)"
+                            if name.isupper()
+                            else ""
+                        )
+                    )
+                    result.failures.append(
+                        LintFailure(
+                            file=rel,
+                            line=getattr(node, "lineno", None),
+                            column=getattr(node, "col_offset", None),
+                            message=(
+                                f"`.instruct(prefix={name})`{provenance} uses "
+                                f"the `prefix=` parameter to inject persona / "
+                                f"system-prompt text. `prefix=` is for "
+                                f"structured-output continuation (e.g. "
+                                f"`prefix='{{\"result\":\"'`), not persona "
+                                f"injection. Fix: use `model_options="
+                                f"{{ModelOption.SYSTEM_PROMPT: {name}}}` "
+                                f"instead (`from mellea.backends.model_options"
+                                f" import ModelOption`)."
+                            ),
+                            rule_ref="KB7 (prefix= for persona vs SYSTEM_PROMPT)",
+                        )
+                    )
+
+    if result.failures:
+        result.verdict = "fail"
+    return result
+
+
+# ─── Shared helpers: m.instruct / start_session pattern detection ───
+#
+# Used by instruct-result-parse-before-access, format-annotation, and
+# session-boundary. The three lints share the same surface (pipeline.py,
+# slots.py, constrained_slots.py) and the same notion of an "m.instruct(...)"
+# call assigned to a Name target.
+
+
+_INSTRUCT_LINT_FILES: Tuple[str, ...] = (
+    "pipeline.py",
+    "slots.py",
+    "constrained_slots.py",
+)
+
+
+def _is_m_instruct_call(node: ast.AST) -> bool:
+    """True iff node is a `Call` whose func is `m.instruct` (Attribute on Name 'm')."""
+    if not isinstance(node, ast.Call):
+        return False
+    func = node.func
+    if not isinstance(func, ast.Attribute) or func.attr != "instruct":
+        return False
+    return isinstance(func.value, ast.Name) and func.value.id == "m"
+
+
+def _instruct_call_has_format_kwarg(node: ast.Call) -> bool:
+    """True iff an `m.instruct(...)` Call has a `format=` keyword."""
+    return any(kw.arg == "format" for kw in node.keywords)
+
+
+def _iter_function_scopes(tree: ast.AST):
+    """Yield every FunctionDef/AsyncFunctionDef + the module-level scope."""
+    yield tree
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            yield node
+
+
+
 # ─── Runner ───
 
 
@@ -1316,6 +1884,9 @@ ALL_LINTS: Tuple[Callable[[Path], LintResult], ...] = (
     lint_session_boundary,
     lint_validation_fn_not_called_directly,
     lint_fixture_pydantic_coercion,
+    lint_grounding_context_types,
+    lint_stdlib_arg_types,
+    lint_prefix_persona,
 )
 
 
