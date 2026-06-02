@@ -40,6 +40,33 @@ LOGGER = configure_logger()
 console = Console(log_time=True)
 
 
+def _resolve_writers_repo_root(start: Path) -> Path:
+    """Walk up from ``start`` looking for a directory containing
+    ``.claude/melleafy/writers/``.
+
+    Used to locate the writers directory that the deterministic writer
+    renderer (``compile/writer_renderer.py``) reads. The caller passes in the
+    installed ``mellea_skills_compiler`` package directory (NOT the generated
+    skill package directory) so the walk-up succeeds even when the spec was
+    compiled out-of-tree.
+
+    Raises:
+        FileNotFoundError: if no ancestor directory contains
+            ``.claude/melleafy/writers/``. This indicates the compiler is
+            installed against a source tree that has been stripped of its
+            companion ``.claude/`` directory — the compile cannot proceed.
+    """
+    start = start.resolve()
+    for parent in [start, *start.parents]:
+        if (parent / ".claude" / "melleafy" / "writers").is_dir():
+            return parent
+    raise FileNotFoundError(
+        "Could not locate .claude/melleafy/writers/ relative to "
+        f"{start}. The compiler must be installed (editable or otherwise) "
+        "from a repo that contains .claude/melleafy/writers/."
+    )
+
+
 def _select_canonical_mellea_dir(skill_dir: Path, package_name: str) -> list[Path]:
     """Return the canonical *_mellea directory list under ``skill_dir``.
 
@@ -491,21 +518,26 @@ def compile(
             # the file the LLM put on disk. Logs WARN on diff so we can build
             # confidence the diffs are stable before flipping to ENFORCE mode.
             try:
+                import mellea_skills_compiler
                 from mellea_skills_compiler.compile.writer_renderer import (
                     default_writer_specs,
                     render_writers,
                 )
 
-                # Repo root = directory holding `.claude/`. Walk up from the
-                # package dir until we find it.
-                repo_root = mellea_dirs[0]
-                for parent in [repo_root, *repo_root.parents]:
-                    if (parent / ".claude" / "melleafy" / "writers").is_dir():
-                        repo_root = parent
-                        break
+                # Locate the writers directory by walking up from the
+                # *installed compiler package*, NOT from the generated
+                # package's directory. The previous walk-up-from-package
+                # logic only worked when the spec was compiled in-tree;
+                # out-of-tree skill specs (the standard eval-harness use
+                # case) silently fell off the top of the filesystem,
+                # defaulted repo_root to the package dir, and shipped
+                # packages missing config.py and fixtures/. See
+                # ``_resolve_writers_repo_root`` for the resolution helper.
+                _compiler_pkg_dir = Path(mellea_skills_compiler.__file__).resolve().parent
+                _writers_repo_root = _resolve_writers_repo_root(_compiler_pkg_dir)
                 render_writers(
                     mellea_dirs[0],
-                    default_writer_specs(repo_root),
+                    default_writer_specs(_writers_repo_root),
                     enforce=True,  # config.py promoted from WARN to ENFORCE in Step 3
                 )
             except Exception as renderer_exc:  # noqa: BLE001
