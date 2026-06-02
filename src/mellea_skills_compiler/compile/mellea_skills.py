@@ -512,39 +512,30 @@ def compile(
         skill_dir = spec_path if spec_path.is_dir() else spec_path.parent
         mellea_dirs = _select_canonical_mellea_dir(skill_dir, package_name)
         if mellea_dirs:
-            # Wrapper-side writer invocation (migration phase: WARN only).
-            # Reads intermediate/<artifact>_emission.json, runs the deterministic
-            # writer in .claude/melleafy/writers/, and diffs the output against
-            # the file the LLM put on disk. Logs WARN on diff so we can build
-            # confidence the diffs are stable before flipping to ENFORCE mode.
-            try:
-                import mellea_skills_compiler
-                from mellea_skills_compiler.compile.writer_renderer import (
-                    default_writer_specs,
-                    render_writers,
-                )
+            # Wrapper-side writer invocation.
+            # Reads intermediate/<artifact>_emission.json and runs the
+            # deterministic writer in .claude/melleafy/writers/. config.py
+            # and fixtures/ are mandatory artifacts — any failure here is a
+            # hard error: the compiled package would otherwise ship without
+            # them while lints pass against the LLM-emitted files, producing
+            # a falsely-green compile.
+            import mellea_skills_compiler
+            from mellea_skills_compiler.compile.writer_renderer import (
+                default_writer_specs,
+                render_writers,
+            )
 
-                # Locate the writers directory by walking up from the
-                # *installed compiler package*, NOT from the generated
-                # package's directory. The previous walk-up-from-package
-                # logic only worked when the spec was compiled in-tree;
-                # out-of-tree skill specs (the standard eval-harness use
-                # case) silently fell off the top of the filesystem,
-                # defaulted repo_root to the package dir, and shipped
-                # packages missing config.py and fixtures/. See
-                # ``_resolve_writers_repo_root`` for the resolution helper.
-                _compiler_pkg_dir = Path(mellea_skills_compiler.__file__).resolve().parent
-                _writers_repo_root = _resolve_writers_repo_root(_compiler_pkg_dir)
-                render_writers(
-                    mellea_dirs[0],
-                    default_writer_specs(_writers_repo_root),
-                    enforce=True,  # config.py promoted from WARN to ENFORCE in Step 3
-                )
-            except Exception as renderer_exc:  # noqa: BLE001
-                LOGGER.warning(
-                    "Writer renderer failed (non-fatal during migration): %s",
-                    renderer_exc,
-                )
+            # Locate the writers directory by walking up from the
+            # *installed compiler package*, NOT from the generated
+            # package's directory. See `_resolve_writers_repo_root` for
+            # the resolution helper.
+            _compiler_pkg_dir = Path(mellea_skills_compiler.__file__).resolve().parent
+            _writers_repo_root = _resolve_writers_repo_root(_compiler_pkg_dir)
+            render_writers(
+                mellea_dirs[0],
+                default_writer_specs(_writers_repo_root),
+                enforce=True,
+            )
 
             # validate compiled skill pipeline
             validate(mellea_dirs[0], no_run=no_run, all_fixtures=False)
