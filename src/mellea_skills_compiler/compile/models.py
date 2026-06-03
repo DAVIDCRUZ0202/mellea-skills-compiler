@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import ModuleType, Optional
+from types import ModuleType
 
 
 @dataclass(frozen=True)
