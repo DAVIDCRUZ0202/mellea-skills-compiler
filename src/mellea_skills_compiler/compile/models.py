@@ -1,6 +1,5 @@
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Optional
+from typing import ModuleType, Optional
 
 
 @dataclass(frozen=True)
@@ -18,7 +17,7 @@ class WriterSpec:
     name: str  # human-readable label, e.g. "config.py"
     emission_relpath: str  # e.g. "intermediate/config_emission.json"
     output_relpath: str  # e.g. "config.py" or "fixtures"
-    writer: Path  # absolute path to the .claude/melleafy/writers/*.py module
+    writer: ModuleType  # the corresponding writer module from mellea_skills_compiler/compile/writer/
     output_kind: str = "file"  # "file" | "directory"
 
 
