@@ -42,7 +42,7 @@ LOGGER = configure_logger()
 console = Console(log_time=True)
 
 
-def _select_canonical_mellea_dir(spec_path: Path, package_name: str) -> list[Path]:
+def _select_canonical_mellea_dir(spec_path: Path, package_name: str) -> Path:
     """Return the canonical *_mellea directory list under ``skill_dir``.
 
     Filters ``skill_dir`` for entries ending in ``_mellea`` and resolves which
@@ -86,7 +86,7 @@ def _select_canonical_mellea_dir(spec_path: Path, package_name: str) -> list[Pat
                 canonical[0].name,
                 [d.name for d in stray],
             )
-            return canonical
+            return canonical[0]
         raise Exception(
             f"Found {len(mellea_dirs)} *_mellea directories in "
             f"{skill_dir}, none matching the wrapper-derived "
