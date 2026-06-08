@@ -1,9 +1,9 @@
-"""Audit trail hook — records every pipeline event to a JSONL log.
+"""Audit trail hook — records every pipeline event to a JSONL LOGGER.
 
 Captures generation calls, Guardian verdicts, component lifecycle events,
 and validation outcomes.  Designed to compose with GuardianAuditPlugin
 (priority 40) — this hook runs at priority 100 so Guardian verdicts are
-available in user_metadata by the time we log.
+available in user_metadata by the time we LOGGER.
 
 Usage:
     from audit_trail_hook import AuditTrailPlugin
@@ -16,17 +16,25 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional, Union
 
+from mellea import plugins as mellea_plugins
 from mellea.plugins import HookType, Plugin, PluginMode, hook
 
+from mellea_skills_compiler.plugins import BasePlugin
+from mellea_skills_compiler.plugins.guardian import (
+    GuardianAuditPlugin,
+    GuardianEnforcePlugin,
+)
 from mellea_skills_compiler.toolkit.logging import configure_logger
 
 
-log = configure_logger("mellea_skills_compiler.audit")
+LOGGER = configure_logger()
 
 
-class AuditTrailPlugin(Plugin, name="mellea_skills_compiler-audit-trail", priority=100):
+class AuditTrailPlugin(
+    BasePlugin, Plugin, name="mellea_skills_compiler-audit-trail", priority=100
+):
     """Append-only JSONL audit trail for GraniteClawHub PoC.
 
     Each entry contains:
@@ -40,14 +48,27 @@ class AuditTrailPlugin(Plugin, name="mellea_skills_compiler-audit-trail", priori
 
     def __init__(
         self,
-        log_path: str | Path = "audit_trail.jsonl",
-        policy_id: str = "",
-        guardian_ref: Any = None,
+        output_dir: Path,
+        guardian_plugin: Optional[
+            Union[
+                GuardianAuditPlugin,
+                GuardianEnforcePlugin,
+            ]
+        ] = None,
     ):
-        self.log_path = Path(log_path)
-        self.policy_id = policy_id
-        self._guardian_ref = guardian_ref
+        self.guardian_plugin = guardian_plugin
+        self.policy_id = (
+            f"nexus-{guardian_plugin.manifest.taxonomy}" if guardian_plugin else ""
+        )
         self._entries: list[dict] = []
+
+        # audit log
+        log_path = output_dir / "audit_trail.jsonl"
+        if log_path.exists():
+            log_path.unlink()
+        self.log_path = log_path
+
+        LOGGER.info("Audit trail path: %s", log_path)
 
     def _write(self, entry: dict) -> None:
         entry["timestamp"] = datetime.now(UTC).isoformat()
@@ -83,9 +104,11 @@ class AuditTrailPlugin(Plugin, name="mellea_skills_compiler-audit-trail", priori
 
         # Try user_metadata first, then fall back to the Guardian plugin ref
         verdicts = payload.user_metadata.get("guardian_verdicts", [])
-        if not verdicts and self._guardian_ref is not None:
+        if not verdicts and self.guardian_plugin is not None:
             # Read the most recent verdicts from the Guardian plugin directly
-            recent = self._guardian_ref.all_verdicts[-len(self._guardian_ref.risks) :]
+            recent = self.guardian_plugin.all_verdicts[
+                -len(self.guardian_plugin.risks) :
+            ]
             verdicts = [
                 {
                     "risk": v.risk,
@@ -112,7 +135,9 @@ class AuditTrailPlugin(Plugin, name="mellea_skills_compiler-audit-trail", priori
 
         if any_risk:
             flagged = [v["risk"] for v in verdicts if v.get("label") == "Yes"]
-            log.warning("[audit] RISK DETECTED — flagged risks: %s", ", ".join(flagged))
+            LOGGER.warning(
+                "[audit] RISK DETECTED — flagged risks: %s", ", ".join(flagged)
+            )
 
     # ── Component hooks ─────────────────────────────────────────────
 
@@ -186,10 +211,12 @@ class AuditTrailPlugin(Plugin, name="mellea_skills_compiler-audit-trail", priori
 
         # Check for Guardian verdicts on tool output
         verdicts = []
-        if self._guardian_ref is not None:
+        if self.guardian_plugin is not None:
             # Look for tool-prefixed verdicts added by Guardian
             recent = [
-                v for v in self._guardian_ref.all_verdicts if v.risk.startswith("tool:")
+                v
+                for v in self.guardian_plugin.all_verdicts
+                if v.risk.startswith("tool:")
             ]
             verdicts = [
                 {
@@ -198,7 +225,7 @@ class AuditTrailPlugin(Plugin, name="mellea_skills_compiler-audit-trail", priori
                     "raw": v.raw_output,
                     "ts": v.timestamp,
                 }
-                for v in recent[-len(getattr(self._guardian_ref, "risks", [])) :]
+                for v in recent[-len(getattr(self.guardian_plugin, "risks", [])) :]
             ]
 
         any_risk = any(v.get("label") == "Yes" for v in verdicts)
@@ -221,7 +248,7 @@ class AuditTrailPlugin(Plugin, name="mellea_skills_compiler-audit-trail", priori
 
         if any_risk:
             flagged = [v["risk"] for v in verdicts if v.get("label") == "Yes"]
-            log.warning("[audit] TOOL RISK — %s: %s", tool_name, ", ".join(flagged))
+            LOGGER.warning("[audit] TOOL RISK — %s: %s", tool_name, ", ".join(flagged))
 
     # ── Summary ─────────────────────────────────────────────────────
 

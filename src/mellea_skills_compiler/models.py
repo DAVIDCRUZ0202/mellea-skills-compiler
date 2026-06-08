@@ -134,3 +134,13 @@ class ComplianceSummary:
             "PARTIAL": c.get("PARTIAL", 0),
             "MANUAL": c.get("MANUAL", 0),
         }
+
+
+@dataclass
+class GuardianVerdict:
+    """Result of a single Guardian risk check."""
+
+    risk: str
+    label: str  # "Yes" (risk detected), "No" (safe), "Failed"
+    raw_output: str = ""
+    timestamp: str = field(default_factory=lambda: datetime.now(UTC).isoformat())

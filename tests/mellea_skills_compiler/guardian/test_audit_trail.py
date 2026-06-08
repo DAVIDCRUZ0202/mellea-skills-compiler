@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from mellea_skills_compiler.guardian.audit_trail import AuditTrailPlugin
+from mellea_skills_compiler.plugins.audit import AuditTrailPlugin
 
 
 @pytest.fixture

@@ -261,12 +261,11 @@ def generate_policy_markdown(manifest: PolicyManifest) -> str:
     return "\n".join(lines)
 
 
-def load_policy_manifest(audit_dir: Path) -> PolicyManifest:
+def load_policy_manifest(manifest_path: Path) -> PolicyManifest:
     """Search for policy_manifest.json in standard locations.
 
     Checks the skill root first (portable), then the audit directory.
     """
-    manifest_path = audit_dir / "policy_manifest.json"
     if manifest_path.is_file():
         try:
             return PolicyManifest.from_json(str(manifest_path))
@@ -275,4 +274,4 @@ def load_policy_manifest(audit_dir: Path) -> PolicyManifest:
                 f"Failed to load policy manifest from {manifest_path}: {str(e)}",
             )
 
-    raise Exception(f"No policy_manifest.json found in {audit_dir}")
+    raise Exception(f"Policy_manifest does not found at {manifest_path}.")

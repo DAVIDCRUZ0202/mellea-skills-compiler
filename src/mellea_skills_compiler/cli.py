@@ -345,7 +345,7 @@ def certify(
             InferenceEngineType[inference_engine],
         )
     except Exception as e:
-        LOGGER.error(str(e))
+        LOGGER.error(f"Certify command failed - {str(e)}")
         raise typer.Exit(code=1)
 
 

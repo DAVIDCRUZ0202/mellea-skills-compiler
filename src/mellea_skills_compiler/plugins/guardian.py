@@ -30,29 +30,19 @@ from __future__ import annotations
 
 import logging
 import urllib.error
-from dataclasses import dataclass, field
-from datetime import UTC, datetime
 from typing import Any, Optional
 
 from mellea.plugins import HookType, Plugin, PluginMode, hook
 from mellea.plugins.registry import block
 
-from mellea_skills_compiler.enums import InferenceEngineType
+from mellea_skills_compiler.enums import InferenceEngineType, PipelineMode
 from mellea_skills_compiler.inference import InferenceService
+from mellea_skills_compiler.models import GuardianVerdict
+from mellea_skills_compiler.plugins import BasePlugin
 from mellea_skills_compiler.toolkit.logging import configure_logger
 
 
-log = configure_logger("MelleaSkills.guardian_hook")
-
-
-@dataclass
-class GuardianVerdict:
-    """Result of a single Guardian risk check."""
-
-    risk: str
-    label: str  # "Yes" (risk detected), "No" (safe), "Failed"
-    raw_output: str = ""
-    timestamp: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
+LOGGER = configure_logger()
 
 
 def _parse_guardian_score(text: str) -> str:
@@ -110,12 +100,12 @@ def _call_guardian(
         label = _parse_guardian_score(raw_prediction)
         return GuardianVerdict(risk=risk, label=label, raw_output=raw_prediction)
     except (urllib.error.URLError, urllib.error.HTTPError, KeyError) as e:
-        log.warning("Guardian call failed for risk=%s: %s", risk, e)
+        LOGGER.warning("Guardian call failed for risk=%s: %s", risk, e)
         return GuardianVerdict(risk=risk, label="Failed", raw_output=str(e))
 
 
-def _run_guardian_checks(
-    plugin: _GuardianBase, payload: Any, guardian_model: str, inference_engine: str
+def _run_guardian_post_checks(
+    plugin: GuardianPlugin, payload: Any, guardian_model: str, inference_engine: str
 ) -> tuple[list[GuardianVerdict], list[str]]:
     """Shared logic: run Guardian checks and return (verdicts, flagged_labels)."""
     mot = payload.model_output
@@ -146,9 +136,9 @@ def _run_guardian_checks(
         verdict.risk = risk_label
         verdicts.append(verdict)
         level = logging.WARNING if verdict.label == "Yes" else logging.INFO
-        log.log(
+        LOGGER.log(
             level,
-            "[guardian] risk=%s label=%s output_preview=%.60s",
+            "[guardian-post] risk=%s label=%s output_preview=%.60s",
             risk_label,
             verdict.label,
             assistant_text.replace("\n", " "),
@@ -169,7 +159,7 @@ def _run_guardian_checks(
 
 
 def _run_guardian_pre_checks(
-    plugin: _GuardianBase, payload: Any, guardian_model: str, inference_engine: str
+    plugin: GuardianPlugin, payload: Any, guardian_model: str, inference_engine: str
 ) -> tuple[list[GuardianVerdict], list[str]]:
     """Pre-generation check: assess the input prompt before LLM generation.
 
@@ -199,7 +189,7 @@ def _run_guardian_pre_checks(
         verdict.risk = risk_label
         verdicts.append(verdict)
         level = logging.WARNING if verdict.label == "Yes" else logging.INFO
-        log.log(
+        LOGGER.log(
             level,
             "[guardian-pre] risk=%s label=%s input_preview=%.60s",
             risk_label,
@@ -213,25 +203,77 @@ def _run_guardian_pre_checks(
     return verdicts, flagged
 
 
-class _GuardianBase:
+class GuardianPluginFactory:
+
+    def create(pipeline_mode: PipelineMode, *args, **kwargs):
+        guardian_plugin_class = (
+            GuardianEnforcePlugin
+            if pipeline_mode == PipelineMode.ENFORCE
+            else GuardianAuditPlugin
+        )
+        return guardian_plugin_class(*args, **kwargs)
+
+
+class GuardianPlugin(BasePlugin):
     """Shared state and factory methods for Guardian plugins."""
 
     def __init__(
         self,
-        risks: Optional[list[str]] = None,
-        risk_labels: Optional[list[str]] = None,
+        manifest: Any,
         guardian_model: Optional[str] = None,
         inference_engine: Optional[InferenceEngineType] = None,
     ):
-        self.risks = risks or ["harm", "social_bias", "jailbreak"]
-        self.risk_labels = risk_labels or self.risks
+        """Create plugin from a Nexus PolicyManifest.
+
+        Args:
+            manifest: A PolicyManifest with guardian_risks and risk_names.
+            enforce: If True, returns a GuardianEnforcePlugin (SEQUENTIAL mode)
+                that blocks generation when risks are detected.
+            guardian_model: The guardian model
+            inference_engine: The inference engine, defaults to Ollama
+        """
+
+        self.manifest = manifest
+        self.risks = manifest.guardian_risks or ["harm", "social_bias", "jailbreak"]
+        self.risk_labels = manifest.risk_names or self.risks
         self.all_verdicts: list[GuardianVerdict] = []
         self.guardian_model = guardian_model
         self.inference_engine = inference_engine
 
+        LOGGER.info(
+            f"Guardian registered: {len(self.risks)} risks, mode={self._PIPELINE_MODE}",
+        )
+
+    def register(self) -> None:
+
+        # Log tier breakdown for transparency
+        native = [r for r in self.manifest.risks if r.is_native]
+        custom = [r for r in self.manifest.risks if not r.is_native]
+        LOGGER.info(
+            "Guardian plugin (%s): %d risks — %d native, %d custom criteria",
+            self._PIPELINE_MODE,
+            len(self.manifest.risks),
+            len(native),
+            len(custom),
+        )
+        for r in native:
+            LOGGER.info("  [native]  %s → %s", r.name, r.guardian_prompt)
+        for r in custom:
+            LOGGER.info("  [custom]  %s → %.60s", r.name, r.guardian_prompt)
+
+        super().register()
+
+    def summary(self) -> dict:
+        return {
+            "total_verdicts": len(self.all_verdicts),
+            "flagged_verdicts": [v for v in self.all_verdicts if v.label == "Yes"],
+            "passed_verdicts": [v for v in self.all_verdicts if v.label == "No"],
+            "failed_verdicts": [v for v in self.all_verdicts if v.label == "Failed"],
+        }
+
 
 class GuardianAuditPlugin(
-    _GuardianBase, Plugin, name="granite-guardian-audit", priority=40
+    GuardianPlugin, Plugin, name="granite-guardian-audit", priority=40
 ):
     """Observe-only Guardian hook (AUDIT mode).
 
@@ -242,46 +284,10 @@ class GuardianAuditPlugin(
     which returns a ``GuardianEnforcePlugin`` instead.
     """
 
-    @classmethod
-    def from_manifest(
-        cls,
-        manifest: Any,
-        enforce: bool = False,
-        guardian_model: Optional[str] = None,
-        inference_engine: InferenceEngineType = InferenceEngineType.OLLAMA,
-    ) -> GuardianAuditPlugin | GuardianEnforcePlugin:
-        """Create a plugin from a Nexus PolicyManifest.
+    _PIPELINE_MODE = PipelineMode.AUDIT
 
-        Args:
-            manifest: A PolicyManifest with guardian_risks and risk_names.
-            enforce: If True, returns a GuardianEnforcePlugin (SEQUENTIAL mode)
-                that blocks generation when risks are detected.
-            guardian_model: The guardian model
-            inference_engine: The inference engine, defaults to Ollama
-        """
-        # Log tier breakdown for transparency
-        native = [r for r in manifest.risks if r.is_native]
-        custom = [r for r in manifest.risks if not r.is_native]
-        mode_label = "ENFORCE" if enforce else "AUDIT"
-        log.info(
-            "Guardian plugin (%s): %d risks — %d native, %d custom criteria",
-            mode_label,
-            len(manifest.risks),
-            len(native),
-            len(custom),
-        )
-        for r in native:
-            log.info("  [native]  %s → %s", r.name, r.guardian_prompt)
-        for r in custom:
-            log.info("  [custom]  %s → %.60s", r.name, r.guardian_prompt)
-
-        target_cls = GuardianEnforcePlugin if enforce else cls
-        return target_cls(
-            risks=manifest.guardian_risks,
-            risk_labels=manifest.risk_names,
-            guardian_model=guardian_model,
-            inference_engine=inference_engine,
-        )
+    def __init__(self, manifest, guardian_model, inference_engine):
+        super().__init__(manifest, guardian_model, inference_engine)
 
     @hook(HookType.GENERATION_PRE_CALL, mode=PluginMode.AUDIT)
     async def check_input(self, payload: Any, ctx: Any) -> None:
@@ -293,7 +299,9 @@ class GuardianAuditPlugin(
     @hook(HookType.GENERATION_POST_CALL, mode=PluginMode.AUDIT)
     async def check_output(self, payload: Any, ctx: Any) -> None:
         """Post-generation: assess LLM output for risks (observe-only)."""
-        _run_guardian_checks(self, payload, self.guardian_model, self.inference_engine)
+        _run_guardian_post_checks(
+            self, payload, self.guardian_model, self.inference_engine
+        )
 
     @hook(HookType.TOOL_PRE_INVOKE, mode=PluginMode.AUDIT)
     async def check_tool_input(self, payload: Any, ctx: Any) -> None:
@@ -306,7 +314,7 @@ class GuardianAuditPlugin(
         tool_call = payload.model_tool_call
         tool_name = getattr(tool_call, "name", "unknown")
         args = getattr(tool_call, "args", {})
-        log.info("[guardian-tool] PRE_INVOKE %s(%s)", tool_name, str(args)[:100])
+        LOGGER.info(f"[guardian-pre-tool] {tool_name}(args={str(args)[:100]})")
 
     @hook(HookType.TOOL_POST_INVOKE, mode=PluginMode.AUDIT)
     async def check_tool_output(self, payload: Any, ctx: Any) -> None:
@@ -320,44 +328,33 @@ class GuardianAuditPlugin(
         tool_output = str(payload.tool_output or "")
         latency = payload.execution_time_ms
 
-        if not tool_output or not payload.success:
-            log.info(
-                "[guardian-tool] POST_INVOKE %s — %s, %dms",
-                tool_name,
-                "error" if not payload.success else "empty",
-                latency,
-            )
-            return
-
-        log.info(
-            "[guardian-tool] POST_INVOKE %s — %d bytes, %dms",
-            tool_name,
-            len(tool_output),
-            latency,
+        LOGGER.info(
+            f"[guardian-post-tool] {tool_name} — {'error' if not payload.success else str(len(tool_output))+" bytes"}, {latency}ms"
         )
 
-        # Run Guardian checks on the tool output (treat as assistant text)
-        verdicts: list[GuardianVerdict] = []
-        for risk_prompt, risk_label in zip(self.risks, self.risk_labels):
-            verdict = _call_guardian(
-                user_text=f"Tool {tool_name} was called",
-                risk=risk_prompt,
-                assistant_text=tool_output[:2000],
-                guardian_model=self.guardian_model,
-                inference_engine=self.inference_engine,
-            )
-            verdict.risk = f"tool:{risk_label}"
-            verdicts.append(verdict)
-            if verdict.label == "Yes":
-                log.warning(
-                    "[guardian-tool] RISK in %s output: %s", tool_name, risk_label
+        if not (not tool_output or not payload.success):
+            # Run Guardian checks on the tool output (treat as assistant text)
+            verdicts: list[GuardianVerdict] = []
+            for risk_prompt, risk_label in zip(self.risks, self.risk_labels):
+                verdict = _call_guardian(
+                    user_text=f"Tool {tool_name} was called",
+                    risk=risk_prompt,
+                    assistant_text=tool_output[:2000],
+                    guardian_model=self.guardian_model,
+                    inference_engine=self.inference_engine,
                 )
+                verdict.risk = f"tool:{risk_label}"
+                verdicts.append(verdict)
+                if verdict.label == "Yes":
+                    LOGGER.warning(
+                        "[guardian-tool] RISK in %s output: %s", tool_name, risk_label
+                    )
 
-        self.all_verdicts.extend(verdicts)
+            self.all_verdicts.extend(verdicts)
 
 
 class GuardianEnforcePlugin(
-    _GuardianBase, Plugin, name="granite-guardian-enforce", priority=40
+    GuardianPlugin, Plugin, name="granite-guardian-enforce", priority=40
 ):
     """Enforcement Guardian hook (SEQUENTIAL mode).
 
@@ -365,6 +362,11 @@ class GuardianEnforcePlugin(
     If any risk is flagged, returns block() to halt the pipeline
     with a PluginViolationError.
     """
+
+    _PIPELINE_MODE = PipelineMode.ENFORCE
+
+    def __init__(self, manifest, guardian_model, inference_engine):
+        super().__init__(manifest, guardian_model, inference_engine)
 
     @hook(HookType.GENERATION_PRE_CALL, mode=PluginMode.SEQUENTIAL)
     async def enforce_input(self, payload: Any, ctx: Any) -> Any:
@@ -374,7 +376,7 @@ class GuardianEnforcePlugin(
         )
         if flagged:
             risk_list = ", ".join(flagged)
-            log.warning(
+            LOGGER.warning(
                 "[guardian-enforce] BLOCKING INPUT — risks flagged: %s", risk_list
             )
             return block(
@@ -387,12 +389,12 @@ class GuardianEnforcePlugin(
     @hook(HookType.GENERATION_POST_CALL, mode=PluginMode.SEQUENTIAL)
     async def enforce_output(self, payload: Any, ctx: Any) -> Any:
         """Post-generation: block if LLM output has risks."""
-        verdicts, flagged = _run_guardian_checks(
+        verdicts, flagged = _run_guardian_post_checks(
             self, payload, self.guardian_model, self.inference_engine
         )
         if flagged:
             risk_list = ", ".join(flagged)
-            log.warning(
+            LOGGER.warning(
                 "[guardian-enforce] BLOCKING OUTPUT — risks flagged: %s", risk_list
             )
             return block(
@@ -408,7 +410,7 @@ class GuardianEnforcePlugin(
         tool_call = payload.model_tool_call
         tool_name = getattr(tool_call, "name", "unknown")
         args = getattr(tool_call, "args", {})
-        log.info(
+        LOGGER.info(
             "[guardian-enforce-tool] PRE_INVOKE %s(%s)", tool_name, str(args)[:100]
         )
         return None
@@ -440,7 +442,7 @@ class GuardianEnforcePlugin(
 
         if flagged:
             risk_list = ", ".join(flagged)
-            log.warning(
+            LOGGER.warning(
                 "[guardian-enforce-tool] BLOCKING — risks in %s output: %s",
                 tool_name,
                 risk_list,

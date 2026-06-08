@@ -54,3 +54,11 @@ class CoverageLevel(Enum):
     AUTOMATED = "AUTOMATED"
     PARTIAL = "PARTIAL"
     MANUAL = "MANUAL"
+
+
+class PipelineMode(Enum):
+    ENFORCE = True
+    AUDIT = False
+
+    def __str__(self):
+        return self.name

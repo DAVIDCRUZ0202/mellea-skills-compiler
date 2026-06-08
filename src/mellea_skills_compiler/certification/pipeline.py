@@ -33,10 +33,16 @@ from mellea_skills_compiler.certification.report import (
     generate_certification_report,
     load_audit_trail,
 )
-from mellea_skills_compiler.enums import InferenceEngineType, SpecFileFormat
-from mellea_skills_compiler.guardian import (
-    deregister_plugins,
-    register_plugins,
+from mellea_skills_compiler.enums import (
+    InferenceEngineType,
+    PipelineMode,
+    SpecFileFormat,
+)
+from mellea_skills_compiler.models import PolicyManifest
+from mellea_skills_compiler.plugins.audit import AuditTrailPlugin
+from mellea_skills_compiler.plugins.guardian import (
+    GuardianPlugin,
+    GuardianPluginFactory,
 )
 from mellea_skills_compiler.toolkit.file_utils import (
     load_fixtures,
@@ -44,6 +50,7 @@ from mellea_skills_compiler.toolkit.file_utils import (
     parse_spec_file,
 )
 from mellea_skills_compiler.toolkit.logging import configure_logger
+
 
 console = Console(log_time=True)
 
@@ -61,26 +68,18 @@ def _run_single_fixture(pipeline_fn: Callable, fixture: Dict):
         else:
             report = pipeline_fn(context)
 
-        LOGGER.info("Pipeline completed successfully.")
+        LOGGER.info("Pipeline executed successfully.")
 
         # Log key fields if available
         for field in ["location", "weather_data", "action", "summary"]:
             if hasattr(report, field) and getattr(report, field):
-                LOGGER.info(
-                    "  %s: %s", field, str(getattr(report, field))[:100]
-                )
+                LOGGER.info("  %s: %s", field, str(getattr(report, field))[:100])
 
     except PluginViolationError as e:
         print()
-        LOGGER.warning(
-            "Pipeline BLOCKED by Guardian enforcement: %s", e.reason
-        )
-        LOGGER.warning(
-            "  The decomposed pipeline was halted because a generation"
-        )
-        LOGGER.warning(
-            "  triggered a Guardian risk detection in ENFORCE mode."
-        )
+        LOGGER.warning("Pipeline BLOCKED by Guardian enforcement: %s", e.reason)
+        LOGGER.warning("  The decomposed pipeline was halted because a generation")
+        LOGGER.warning("  triggered a Guardian risk detection in ENFORCE mode.")
         print()
 
     return report
@@ -92,86 +91,61 @@ def skill_pipeline(
     enforce: bool = False,
     no_guardian: bool = False,
 ):
-    # Verify skill pipeline directory exists
-    if pipeline_dir.exists():
-        # Verify that given path is a directory
-        if not pipeline_dir.is_dir():
-            raise ValueError(
-                "The specified path is not a directory. Please note that the run command only accepts a compiled skill directory."
-            )
-    else:
-        raise FileNotFoundError(
-            f"Skill pipeline directory not found: {pipeline_dir}"
-        )
+    # Audit directory
+    audit_dir = pipeline_dir.parent / "audit"
 
-    # Load skill pipeline
-    pipeline_fn = load_skill_pipeline(pipeline_dir)
-
-    # Load fixtures from the pipeline directory
-    fixtures = load_fixtures(pipeline_dir)
-
-    # Get the desired fixture
-    fixture = None
-    for f in fixtures:
-        if fixture_id == f["id"]:
-            fixture = f
-            break
-    if fixture is None:
-        available = [f["id"] for f in fixtures]
-        LOGGER.error(
-            "Unknown fixture '%s'. Available: %s", fixture_id, available
-        )
-        sys.exit(1)
-
-    # --- Guardian hook registration ---
-    guardian_plugin, audit_plugin = None, None
     if no_guardian:
         LOGGER.info("Guardian checks disabled (--no-guardian)")
-    else:
-        try:
-            # Audit directory
-            audit_dir = pipeline_dir.parent / "audit"
-
-            if not audit_dir.is_dir():
-                raise ValueError(
-                    f"The audit directory is not available in {pipeline_dir.parent}"
-                )
-
-            manifest = load_policy_manifest(audit_dir)
-            guardian_plugin, audit_plugin = register_plugins(
-                manifest, audit_dir, enforce
-            )
-            LOGGER.info("=" * 60)
-            LOGGER.info(
-                f"Guardian Active ({'enforce' if enforce else 'audit'}) — loaded from policy manifest"
-            )
-            LOGGER.info("=" * 60)
-        except Exception as e:
-            console.print(
-                f"[yellow]Warning:[/] {str(e)}."
-                f" Run [bold]mellea-skills ingest[/] or "
-                f"[bold]mellea-skills certify[/] first for Guardian protection. "
-            )
-            LOGGER.info("Running unguarded.")
 
     try:
+        if not audit_dir.is_dir():
+            raise Exception(
+                "The audit directory is not available in {pipeline_dir.parent}."
+            )
+        else:
+            manifest_path = audit_dir / "policy_manifest.json"
+            if not manifest_path.exists():
+                raise Exception("Unable to locate policy manifest [manifest_path].")
+    except Exception as e:
+        manifest_path = None
+        console.print(
+            f"[yellow]Warning:[/] {str(e)}"
+            f" Run [bold]mellea-skills ingest[/] or "
+            f"[bold]mellea-skills certify[/] first for Guardian protection. "
+        )
+        LOGGER.info("Running unguarded.")
+
+    try:
+        if manifest_path:
+            pipeline_mode = PipelineMode(enforce)
+            manifest = load_policy_manifest(manifest_path)
+            LOGGER.info(
+                f"Configuring Guardian hooks from Policy Manifest [{pipeline_mode} mode]...",
+            )
+            guardian_plugin: GuardianPlugin = GuardianPluginFactory.create(
+                pipeline_mode, manifest
+            )
+            guardian_plugin.register()
+            audit_plugin = AuditTrailPlugin(
+                output_dir=output_dir, guardian_plugin=guardian_plugin
+            )
+            audit_plugin.register()
+
         # run the given fixture
-        report = _run_single_fixture(pipeline_fn, fixture)
+        report = _run_single_fixture(pipeline_dir, fixture_id)
 
         # output
         console.print("[bold blue]OUTPUT:[/]")
         print(report)
-
     except Exception as e:
         LOGGER.error(f"Pipeline run failed: {str(e)}")
-    finally:
-        deregister_plugins(guardian_plugin, audit_plugin)
 
 
-def full_pipeline(
+def run_pipeline(
     pipeline_dir: Path,
     fixture_id: Optional[str] = None,
     enforce: bool = False,
+    manifest_path: Path = None,
     model: Optional[str] = None,
     guardian_model: Optional[str] = None,
     inference_engine: InferenceEngineType = InferenceEngineType.OLLAMA,
@@ -195,9 +169,7 @@ def full_pipeline(
                 "The specified path is not a directory. Please note that the certify command only accepts a compiled skill directory."
             )
     else:
-        raise FileNotFoundError(
-            f"Skill pipeline directory not found: {pipeline_dir}"
-        )
+        raise FileNotFoundError(f"Skill pipeline directory not found: {pipeline_dir}")
 
     # Load skill pipeline
     pipeline_fn = load_skill_pipeline(pipeline_dir)
@@ -216,49 +188,13 @@ def full_pipeline(
                 break
         if fixture is None:
             available = [f["id"] for f in fixtures]
-            raise ValueError(
-                f"Unknown fixture '{fixture_id}'. Available: {available}"
-            )
+            raise ValueError(f"Unknown fixture '{fixture_id}'. Available: {available}")
 
-    mode_label = "ENFORCE" if enforce else "AUDIT"
+    pipeline_mode = PipelineMode(enforce)
     print()
     LOGGER.info("=" * 70)
-    LOGGER.info("MelleaSkills — Full Pipeline [%s mode]", mode_label)
+    LOGGER.info(f"MelleaSkills — Full Pipeline [{pipeline_mode} mode]")
     LOGGER.info("=" * 70)
-    print()
-
-    # ── Step 1: Ingest SKILL.md ────────────────────────────────────────
-
-    # load and create ai atlas nexus instance
-    from ai_atlas_nexus.library import AIAtlasNexus
-
-    from mellea_skills_compiler.certification import skill_to_use_case
-    from mellea_skills_compiler.certification.classification import (
-        classify_skill_sensitivity,
-    )
-
-    nexus_data_path = get_data_path()
-    nexus = AIAtlasNexus(base_dir=nexus_data_path)
-
-    # Get skill spec-file path
-    spec_path: Path = pipeline_dir / SpecFileFormat.SKILL_FILE_MD
-    if not spec_path.exists():
-        raise FileNotFoundError(f"Skill spec file not found: {spec_path}")
-
-    LOGGER.info("Step 1: Ingesting %s...", spec_path.name)
-    parsed = parse_spec_file(spec_path)
-    fm = parsed["frontmatter"]
-    sensitivity = classify_skill_sensitivity(
-        fm.get("allowed-tools", []), parsed["body"]
-    )
-    use_case = skill_to_use_case(parsed, sensitivity)
-
-    LOGGER.info("  Name: %s", fm.get("name", "unknown"))
-    LOGGER.info("  Tools: %s", fm.get("allowed-tools", []))
-    LOGGER.info("  Sensitivity: %s", sensitivity["tier_display"])
-    LOGGER.info("  Use-case: %.100s...", use_case)
-    print()
-    LOGGER.info("  Fixture: %s", fixture["id"])
     print()
 
     # Certification artifacts output directory
@@ -266,12 +202,47 @@ def full_pipeline(
     output_dir.mkdir(exist_ok=True)
 
     # ── Step 2: Generate policy manifest from Nexus ────────────────────
-    LOGGER.info("Step 2: Identifying risks via AI Atlas Nexus...")
+    LOGGER.info("Identifying risks via AI Atlas Nexus...")
 
-    # Genereate policy manifest
-    manifest = generate_policy_manifest(
-        use_case, nexus, model, inference_engine
-    )
+    # Load or genereate policy manifest
+    if manifest_path:
+        manifest = load_policy_manifest(manifest_path)
+    else:
+        # ── Step 1: Ingest SKILL.md ────────────────────────────────────────
+
+        # load and create ai atlas nexus instance
+        from ai_atlas_nexus.library import AIAtlasNexus
+
+        from mellea_skills_compiler.certification import skill_to_use_case
+        from mellea_skills_compiler.certification.classification import (
+            classify_skill_sensitivity,
+        )
+
+        nexus_data_path = get_data_path()
+        nexus = AIAtlasNexus(base_dir=nexus_data_path)
+
+        # Get skill spec-file path
+        spec_path: Path = pipeline_dir / SpecFileFormat.SKILL_FILE_MD
+        if not spec_path.exists():
+            raise FileNotFoundError(f"Skill spec file not found: {spec_path}")
+
+        LOGGER.info("Ingesting %s...", spec_path.name)
+        parsed = parse_spec_file(spec_path)
+        fm = parsed["frontmatter"]
+        sensitivity = classify_skill_sensitivity(
+            fm.get("allowed-tools", []), parsed["body"]
+        )
+        use_case = skill_to_use_case(parsed, sensitivity)
+
+        LOGGER.info("  Name: %s", fm.get("name", "unknown"))
+        LOGGER.info("  Tools: %s", fm.get("allowed-tools", []))
+        LOGGER.info("  Sensitivity: %s", sensitivity["tier_display"])
+        LOGGER.info("  Use-case: %.100s...", use_case)
+        print()
+        LOGGER.info("  Fixture: %s", fixture["id"])
+        print()
+        manifest = generate_policy_manifest(use_case, nexus, model, inference_engine)
+
     manifest_path = output_dir / "policy_manifest.json"
     manifest.to_json(manifest_path)
 
@@ -291,17 +262,19 @@ def full_pipeline(
 
     # ── Step 3: Configure plugins from manifest ───────────────────────
     LOGGER.info(
-        "Step 3: Configuring Guardian hooks from policy manifest (%s)...",
-        mode_label,
+        f"Configuring Guardian hooks from Policy Manifest [{pipeline_mode} mode]...",
     )
-    guardian_plugin, audit_plugin = register_plugins(
-        manifest, output_dir, enforce, guardian_model, inference_engine
+    guardian_plugin: GuardianPlugin = GuardianPluginFactory.create(
+        pipeline_mode, manifest, guardian_model, inference_engine
     )
+    guardian_plugin.register()
+    audit_plugin = AuditTrailPlugin(
+        output_dir=output_dir, guardian_plugin=guardian_plugin
+    )
+    audit_plugin.register()
 
     # ── Step 4: Run the decomposed pipeline ───────────────────────────
-    LOGGER.info(
-        "Step 4: Running decomposed pipeline from %s...", pipeline_dir.name
-    )
+    LOGGER.info("Running decomposed pipeline from %s...", pipeline_dir.name)
     LOGGER.info("Guardian checks every generation (pre + post).")
 
     try:
@@ -313,60 +286,52 @@ def full_pipeline(
             if hasattr(report, "model_dump_json"):
                 report_json_path.write_text(report.model_dump_json(indent=2))
             else:
-                report_json_path.write_text(
-                    json.dumps(report, indent=2, default=str)
-                )
+                report_json_path.write_text(json.dumps(report, indent=2, default=str))
 
             LOGGER.info("Pipeline report: %s", report_json_path.name)
     except Exception as e:
         LOGGER.error(f"Pipeline run failed: {str(e)}")
     finally:
-        deregister_plugins(guardian_plugin, audit_plugin)
+        guardian_plugin.deregister()
+        audit_plugin.deregister()
 
     # ── Step 5: Guardian verdict summary ──────────────────────────────
-    LOGGER.info("=" * 70)
-    LOGGER.info("Step 5: Guardian Verdict Summary")
-    LOGGER.info("=" * 70)
-    total_verdicts = len(guardian_plugin.all_verdicts)
-    flagged_verdicts = [
-        v for v in guardian_plugin.all_verdicts if v.label == "Yes"
-    ]
-    passed_verdicts = [
-        v for v in guardian_plugin.all_verdicts if v.label == "No"
-    ]
-    failed_verdicts = [
-        v for v in guardian_plugin.all_verdicts if v.label == "Failed"
-    ]
-
-    LOGGER.info("  Total verdicts: %d", total_verdicts)
-    LOGGER.info("  Passed (No risk): %d", len(passed_verdicts))
-    LOGGER.info("  Flagged (Risk detected): %d", len(flagged_verdicts))
-    if failed_verdicts:
-        LOGGER.info("  Failed (Guardian error): %d", len(failed_verdicts))
+    guardian_summary = guardian_plugin.summary()
     LOGGER.info("")
+    LOGGER.info("=" * 70)
+    LOGGER.info("Guardian Verdict Summary")
+    LOGGER.info("=" * 70)
 
-    if flagged_verdicts:
+    LOGGER.info("  Total verdicts: %d", guardian_summary["total_verdicts"])
+    LOGGER.info("  Passed (No risk): %d", len(guardian_summary["passed_verdicts"]))
+    LOGGER.info(
+        "  Flagged (Risk detected): %d", len(guardian_summary["flagged_verdicts"])
+    )
+    LOGGER.info(
+        "  Failed (Guardian error): %d", len(guardian_summary["failed_verdicts"])
+    )
+    if guardian_summary["flagged_verdicts"]:
         LOGGER.info("  Flagged risks:")
-        for v in flagged_verdicts:
+        for v in guardian_summary["flagged_verdicts"]:
             LOGGER.info(
                 "    [!!] risk=%-25s raw=%.50s",
                 v.risk,
                 v.raw_output.replace("\n", " "),
             )
-    LOGGER.info("")
 
     # ── Step 6: Audit trail summary ───────────────────────────────────
-    LOGGER.info("=" * 70)
-    LOGGER.info("Step 6: Audit Trail Summary")
-    LOGGER.info("=" * 70)
+    LOGGER.info("")
     summary = audit_plugin.summary()
+    LOGGER.info("=" * 70)
+    LOGGER.info("Audit Trail Summary")
+    LOGGER.info("=" * 70)
     for k, v in summary.items():
         LOGGER.info("  %s: %s", k, v)
-    LOGGER.info("")
 
     # ── Step 7: Compliance classification ─────────────────────────────
+    LOGGER.info("")
     LOGGER.info("=" * 70)
-    LOGGER.info("Step 7: Compliance Classification")
+    LOGGER.info("Compliance Classification")
     LOGGER.info("=" * 70)
     compliance = classify_governance_requirements(manifest, nexus)
     counts = compliance.counts
@@ -378,11 +343,11 @@ def full_pipeline(
         counts["MANUAL"],
         total,
     )
-    LOGGER.info("")
 
     # ── Step 8: Certification report ──────────────────────────────────
+    LOGGER.info("")
     LOGGER.info("=" * 70)
-    LOGGER.info("Step 8: Generating Certification Report")
+    LOGGER.info("Generating Certification Report")
     LOGGER.info("=" * 70)
     audit_entries = load_audit_trail(audit_plugin.log_path)
     cert_report = generate_certification_report(
@@ -395,13 +360,13 @@ def full_pipeline(
     cert_path.write_text(cert_report)
     LOGGER.info("  Certification report: %s", cert_path.name)
     LOGGER.info("  Based on %d audit trail events", len(audit_entries))
-    LOGGER.info("")
 
     # ── Final summary ─────────────────────────────────────────────────
+    LOGGER.info("")
     any_risk = any(v.label == "Yes" for v in guardian_plugin.all_verdicts)
     LOGGER.info("=" * 70)
     skill_name = fm.get("name", "unknown")
-    LOGGER.info("COMPLETE — %s [%s]", skill_name, mode_label)
+    LOGGER.info(f"COMPLETE — {skill_name} [{pipeline_mode} mode]")
     LOGGER.info("=" * 70)
     LOGGER.info("")
     LOGGER.info("  Skill: %s (%s)", skill_name, sensitivity["tier_display"])
@@ -409,8 +374,8 @@ def full_pipeline(
     LOGGER.info("  Guardian risks: %d (from Nexus)", len(manifest.risks))
     LOGGER.info(
         "  Guardian verdicts: %d total, %d flagged",
-        total_verdicts,
-        len(flagged_verdicts),
+        guardian_summary["total_verdicts"],
+        len(guardian_summary["flagged_verdicts"]),
     )
     LOGGER.info("  Audit events: %d", len(audit_entries))
     LOGGER.info(
