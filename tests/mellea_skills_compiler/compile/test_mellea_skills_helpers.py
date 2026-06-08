@@ -372,7 +372,7 @@ class TestSelectCanonicalMelleaDir:
         (tmp_path / canonical_name).mkdir()
         (tmp_path / "gdpr_breach_sentinel_oliver_schmidt_mellea").mkdir()
         result = _select_canonical_mellea_dir(tmp_path, canonical_name)
-        assert result[0].name == canonical_name
+        assert result.name == canonical_name
         # Warning should mention the stray
         joined_logs = " ".join(rec.getMessage() for rec in caplog.records)
         assert (
