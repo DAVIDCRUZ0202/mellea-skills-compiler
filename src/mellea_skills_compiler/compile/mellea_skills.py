@@ -56,9 +56,7 @@ def _select_canonical_mellea_dir(spec_path: Path, package_name: str) -> Path:
     rendering/validating a stray sibling on filesystem-ordering coincidence.
 
     Returns:
-        A single-element list containing the canonical directory (suitable
-        for the existing ``mellea_dirs[0]`` consumers), or an empty list if
-        no ``*_mellea`` directory was produced (caller raises in that case).
+        A Path containing the canonical mellea directory
 
     Raises:
         Exception: if more than one ``*_mellea`` directory exists and none
