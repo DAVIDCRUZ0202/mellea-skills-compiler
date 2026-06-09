@@ -331,9 +331,7 @@ class TestBuildSystemPrompt:
         into the rendered prompt — every path mention must use the injected
         name. The literal token may appear once in an explanatory sentence
         referring to the slash-command directive convention, which is fine."""
-        prompt = build_system_prompt(
-            "ollama", "granite4.1:3b", "src", "weather_mellea"
-        )
+        prompt = build_system_prompt("ollama", "granite4.1:3b", "src", "weather_mellea")
         assert "<package_name>/" not in prompt, (
             "Prompt path mentions should substitute the injected package_name, "
             "not carry the literal placeholder as a path prefix"
@@ -341,18 +339,14 @@ class TestBuildSystemPrompt:
 
     def test_explicit_do_not_rederive_instruction(self):
         """Prompt tells the LLM not to re-derive the name from the frontmatter."""
-        prompt = build_system_prompt(
-            "ollama", "granite4.1:3b", "src", "weather_mellea"
-        )
+        prompt = build_system_prompt("ollama", "granite4.1:3b", "src", "weather_mellea")
         # Substring check — phrasing may evolve, but the operational
         # instruction must be present.
         assert "do NOT re-derive" in prompt or "do not re-derive" in prompt.lower()
 
     def test_wrapper_rendered_paths_use_injected_name(self):
         """The wrapper-rendered-paths block uses the injected name, not placeholder."""
-        prompt = build_system_prompt(
-            "ollama", "granite4.1:3b", "src", "weather_mellea"
-        )
+        prompt = build_system_prompt("ollama", "granite4.1:3b", "src", "weather_mellea")
         assert "weather_mellea/config.py" in prompt
         assert "weather_mellea/fixtures/" in prompt
 
@@ -363,15 +357,14 @@ class TestSelectCanonicalMelleaDir:
     def test_single_canonical_dir_returned_as_is(self, tmp_path):
         (tmp_path / "weather_mellea").mkdir()
         result = _select_canonical_mellea_dir(tmp_path, "weather_mellea")
-        assert len(result) == 1
-        assert result[0].name == "weather_mellea"
+        assert result.name == "weather_mellea"
 
     def test_no_mellea_dir_returns_empty(self, tmp_path):
         # Non-mellea subdirs are ignored.
         (tmp_path / "src").mkdir()
         (tmp_path / "references").mkdir()
-        result = _select_canonical_mellea_dir(tmp_path, "weather_mellea")
-        assert result == []
+        with pytest.raises(Exception):
+            result = _select_canonical_mellea_dir(tmp_path, "weather_mellea")
 
     def test_two_dirs_one_canonical_selects_canonical(self, tmp_path, caplog):
         """gdpr-breach-sentinel-style: two *_mellea dirs, one matches package_name."""
@@ -379,11 +372,13 @@ class TestSelectCanonicalMelleaDir:
         (tmp_path / canonical_name).mkdir()
         (tmp_path / "gdpr_breach_sentinel_oliver_schmidt_mellea").mkdir()
         result = _select_canonical_mellea_dir(tmp_path, canonical_name)
-        assert len(result) == 1
-        assert result[0].name == canonical_name
+        assert result.name == canonical_name
         # Warning should mention the stray
         joined_logs = " ".join(rec.getMessage() for rec in caplog.records)
-        assert "gdpr_breach_sentinel_oliver_schmidt_mellea" in joined_logs or len(caplog.records) > 0
+        assert (
+            "gdpr_breach_sentinel_oliver_schmidt_mellea" in joined_logs
+            or len(caplog.records) > 0
+        )
 
     def test_two_dirs_none_matching_raises(self, tmp_path):
         """If multiple *_mellea dirs exist and none match the expected name, raise."""
@@ -399,8 +394,7 @@ class TestSelectCanonicalMelleaDir:
         """If exactly one *_mellea dir exists but it's mis-named, proceed (with warning)."""
         (tmp_path / "wrong_name_mellea").mkdir()
         result = _select_canonical_mellea_dir(tmp_path, "expected_mellea")
-        assert len(result) == 1
-        assert result[0].name == "wrong_name_mellea"  # we proceed
+        assert result.name == "wrong_name_mellea"  # we proceed
         # And a warning was emitted
         warnings_emitted = [r for r in caplog.records if r.levelname == "WARNING"]
         # caplog default level may filter — just check the call didn't raise
@@ -411,5 +405,4 @@ class TestSelectCanonicalMelleaDir:
         (tmp_path / "weather_mellea_old").mkdir()  # doesn't end in _mellea
         (tmp_path / "scripts").mkdir()
         result = _select_canonical_mellea_dir(tmp_path, "weather_mellea")
-        assert len(result) == 1
-        assert result[0].name == "weather_mellea"
+        assert result.name == "weather_mellea"

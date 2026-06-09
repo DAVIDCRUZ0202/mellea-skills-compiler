@@ -8,28 +8,12 @@ representation choices.
 
 from __future__ import annotations
 
-import importlib.util
-import sys
-from pathlib import Path
-
-
-_WRITER_PATH = (
-    Path(__file__).resolve().parents[3]
-    / ".claude"
-    / "melleafy"
-    / "writers"
-    / "config_writer.py"
-)
+from mellea_skills_compiler.compile.writers import config_writer
 
 
 def _load_writer():
     """Load config_writer.py as a module (it lives outside src/ on purpose)."""
-    spec = importlib.util.spec_from_file_location("_config_writer", _WRITER_PATH)
-    assert spec and spec.loader, f"could not load {_WRITER_PATH}"
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return module
+    return config_writer
 
 
 class TestConfigWriterRender:
@@ -55,7 +39,12 @@ class TestConfigWriterRender:
         emission = {
             "constants": [
                 {"name": "LOOP_BUDGET", "value": 4, "type": "int"},
-                {"name": "MODEL_ID", "value": "granite4.1:3b", "type": "str", "category": "C8"},
+                {
+                    "name": "MODEL_ID",
+                    "value": "granite4.1:3b",
+                    "type": "str",
+                    "category": "C8",
+                },
             ]
         }
         source = writer.render(emission)
@@ -73,7 +62,12 @@ class TestConfigWriterRender:
         emission = {
             "constants": [
                 {"name": "MODEL_ID", "value": "x", "type": "str", "category": "C8"},
-                {"name": "PRIORITY_LEVELS", "value": "P1, P2, P3", "type": "str", "category": "—"},
+                {
+                    "name": "PRIORITY_LEVELS",
+                    "value": "P1, P2, P3",
+                    "type": "str",
+                    "category": "—",
+                },
                 {"name": "BACKEND", "value": "ollama", "type": "str", "category": "C8"},
             ]
         }

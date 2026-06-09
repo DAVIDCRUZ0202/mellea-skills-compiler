@@ -4,8 +4,6 @@ Input must conform to .claude/schemas/config_emission.schema.json.
 Output is ready to write directly to <package_name>/config.py.
 """
 
-from __future__ import annotations
-
 import json
 from pathlib import Path
 from typing import Any
