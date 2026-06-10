@@ -68,7 +68,7 @@ class AuditTrailPlugin(
             log_path.unlink()
         self.log_path = log_path
 
-        LOGGER.info("Audit trail path: %s", log_path)
+        LOGGER.info(f"Audit plugin registered - Trail path: {log_path}")
 
     def _write(self, entry: dict) -> None:
         entry["timestamp"] = datetime.now(UTC).isoformat()

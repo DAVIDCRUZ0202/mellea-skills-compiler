@@ -37,7 +37,7 @@ from mellea.plugins.registry import block
 
 from mellea_skills_compiler.enums import InferenceEngineType, PipelineMode
 from mellea_skills_compiler.inference import InferenceService
-from mellea_skills_compiler.models import GuardianVerdict
+from mellea_skills_compiler.models import GuardianVerdict, PolicyManifest
 from mellea_skills_compiler.plugins import BasePlugin
 from mellea_skills_compiler.toolkit.logging import configure_logger
 
@@ -219,7 +219,7 @@ class GuardianPlugin(BasePlugin):
 
     def __init__(
         self,
-        manifest: Any,
+        manifest: PolicyManifest,
         guardian_model: Optional[str] = None,
         inference_engine: Optional[InferenceEngineType] = None,
     ):
@@ -240,19 +240,15 @@ class GuardianPlugin(BasePlugin):
         self.guardian_model = guardian_model
         self.inference_engine = inference_engine
 
-        LOGGER.info(
-            f"Guardian registered: {len(self.risks)} risks, mode={self._PIPELINE_MODE}",
-        )
-
     def register(self) -> None:
 
         # Log tier breakdown for transparency
         native = [r for r in self.manifest.risks if r.is_native]
         custom = [r for r in self.manifest.risks if not r.is_native]
         LOGGER.info(
-            "Guardian plugin (%s): %d risks — %d native, %d custom criteria",
+            "Guardian plugin registered (%s): %d risks — %d native, %d custom criteria",
             self._PIPELINE_MODE,
-            len(self.manifest.risks),
+            len(self.risks),
             len(native),
             len(custom),
         )
@@ -286,7 +282,12 @@ class GuardianAuditPlugin(
 
     _PIPELINE_MODE = PipelineMode.AUDIT
 
-    def __init__(self, manifest, guardian_model, inference_engine):
+    def __init__(
+        self,
+        manifest: PolicyManifest,
+        guardian_model: Optional[str] = None,
+        inference_engine: Optional[InferenceEngineType] = None,
+    ):
         super().__init__(manifest, guardian_model, inference_engine)
 
     @hook(HookType.GENERATION_PRE_CALL, mode=PluginMode.AUDIT)
@@ -347,7 +348,9 @@ class GuardianAuditPlugin(
                 verdicts.append(verdict)
                 if verdict.label == "Yes":
                     LOGGER.warning(
-                        "[guardian-tool] RISK in %s output: %s", tool_name, risk_label
+                        "[guardian-post-tool] RISK in %s output: %s",
+                        tool_name,
+                        risk_label,
                     )
 
             self.all_verdicts.extend(verdicts)
@@ -365,7 +368,12 @@ class GuardianEnforcePlugin(
 
     _PIPELINE_MODE = PipelineMode.ENFORCE
 
-    def __init__(self, manifest, guardian_model, inference_engine):
+    def __init__(
+        self,
+        manifest: PolicyManifest,
+        guardian_model: Optional[str] = None,
+        inference_engine: Optional[InferenceEngineType] = None,
+    ):
         super().__init__(manifest, guardian_model, inference_engine)
 
     @hook(HookType.GENERATION_PRE_CALL, mode=PluginMode.SEQUENTIAL)
@@ -377,7 +385,7 @@ class GuardianEnforcePlugin(
         if flagged:
             risk_list = ", ".join(flagged)
             LOGGER.warning(
-                "[guardian-enforce] BLOCKING INPUT — risks flagged: %s", risk_list
+                "[guardian-enforce-pre] BLOCKING INPUT — risks flagged: %s", risk_list
             )
             return block(
                 reason=f"Guardian detected input risks: {risk_list}",
@@ -395,7 +403,7 @@ class GuardianEnforcePlugin(
         if flagged:
             risk_list = ", ".join(flagged)
             LOGGER.warning(
-                "[guardian-enforce] BLOCKING OUTPUT — risks flagged: %s", risk_list
+                "[guardian-enforce-post] BLOCKING OUTPUT — risks flagged: %s", risk_list
             )
             return block(
                 reason=f"Guardian detected output risks: {risk_list}",
@@ -410,9 +418,7 @@ class GuardianEnforcePlugin(
         tool_call = payload.model_tool_call
         tool_name = getattr(tool_call, "name", "unknown")
         args = getattr(tool_call, "args", {})
-        LOGGER.info(
-            "[guardian-enforce-tool] PRE_INVOKE %s(%s)", tool_name, str(args)[:100]
-        )
+        LOGGER.info("[guardian-enforce-pre-tool] %s(%s)", tool_name, str(args)[:100])
         return None
 
     @hook(HookType.TOOL_POST_INVOKE, mode=PluginMode.SEQUENTIAL)
@@ -443,7 +449,7 @@ class GuardianEnforcePlugin(
         if flagged:
             risk_list = ", ".join(flagged)
             LOGGER.warning(
-                "[guardian-enforce-tool] BLOCKING — risks in %s output: %s",
+                "[guardian-enforce-post-tool] BLOCKING — risks in %s output: %s",
                 tool_name,
                 risk_list,
             )

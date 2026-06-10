@@ -37,9 +37,6 @@ def generate_policy_manifest(
     if not governance_taxonomies:
         governance_taxonomies = GovernanceTaxonomy.list()
 
-    # ── 1. Runtime risk checks ────────────
-    LOGGER.info("Identifying risks for use case: %.100s...", use_case)
-
     # Create Inference engine instance
     risk_inference_engine = InferenceService(inference_engine).risk(
         model, parameters={"temperature": 0}
@@ -274,4 +271,4 @@ def load_policy_manifest(manifest_path: Path) -> PolicyManifest:
                 f"Failed to load policy manifest from {manifest_path}: {str(e)}",
             )
 
-    raise Exception(f"Policy_manifest does not found at {manifest_path}.")
+    raise Exception(f"Policy manifest not available at {manifest_path}.")
