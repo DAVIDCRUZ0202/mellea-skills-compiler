@@ -1,8 +1,8 @@
 """Unit tests for the deterministic pre-mellea-fy helpers in
 mellea_skills_compiler.compile.mellea_skills.
 
-These cover the small private helpers (`derive_package_name`,
-`mirror_companion_dirs`, `resolve_runtime_defaults`,
+These cover the small private helpers (`_derive_mellea_package_name`,
+`mirror_dir_contents_to_target`, `resolve_runtime_defaults`,
 `write_runtime_directive`, `build_system_prompt`) that handle the
 plumbing around the LLM-driven compile() orchestrator. None of these
 require Claude Code, an LLM, network access, or a mellea install.
@@ -15,57 +15,67 @@ import pytest
 
 from mellea_skills_compiler.compile.claude_directives import (
     build_system_prompt,
-    derive_package_name,
-    mirror_companion_dirs,
     resolve_runtime_defaults,
     write_runtime_directive,
 )
-from mellea_skills_compiler.compile.mellea_skills import _select_canonical_mellea_dir
+from mellea_skills_compiler.compile.mellea_skills import (
+    _derive_mellea_package_name,
+    _select_canonical_mellea_dir,
+)
+from mellea_skills_compiler.toolkit.file_utils import mirror_dir_contents_to_target
 
 
 class TestDerivePackageName:
     """Rule OUT-2: lowercase, hyphens/spaces -> underscores, append `_mellea`."""
 
     def test_md_spec_uses_frontmatter_name(self):
-        result = derive_package_name(Path("/x/y/spec.md"), {"name": "weather"})
+        result = _derive_mellea_package_name(Path("/x/y/spec.md"), {"name": "weather"})
         assert result == "weather_mellea"
 
     def test_md_spec_falls_back_to_parent_dir_name_when_no_frontmatter_name(self):
-        result = derive_package_name(Path("/x/weather/spec.md"), {})
+        result = _derive_mellea_package_name(Path("/x/weather/spec.md"), {})
         assert result == "weather_mellea"
 
     def test_md_spec_falls_back_to_parent_dir_name_when_frontmatter_is_none(self):
-        result = derive_package_name(Path("/x/weather/spec.md"), None)
+        result = _derive_mellea_package_name(Path("/x/weather/spec.md"), None)
         assert result == "weather_mellea"
 
     def test_dir_input_uses_directory_name(self, tmp_path):
         skill_dir = tmp_path / "crewai-job-posting"
         skill_dir.mkdir()
-        result = derive_package_name(skill_dir, None)
+        result = _derive_mellea_package_name(skill_dir, None)
         assert result == "crewai_job_posting_mellea"
 
     def test_normalises_uppercase(self):
-        result = derive_package_name(Path("/x/y/spec.md"), {"name": "WeatherSkill"})
+        result = _derive_mellea_package_name(
+            Path("/x/y/spec.md"), {"name": "WeatherSkill"}
+        )
         assert result == "weatherskill_mellea"
 
     def test_normalises_spaces(self):
-        result = derive_package_name(Path("/x/y/spec.md"), {"name": "weather skill"})
+        result = _derive_mellea_package_name(
+            Path("/x/y/spec.md"), {"name": "weather skill"}
+        )
         assert result == "weather_skill_mellea"
 
     def test_collapses_double_underscores(self):
-        result = derive_package_name(Path("/x/y/spec.md"), {"name": "weather--skill"})
+        result = _derive_mellea_package_name(
+            Path("/x/y/spec.md"), {"name": "weather--skill"}
+        )
         assert result == "weather_skill_mellea"
         assert "__" not in result
 
     def test_strips_leading_trailing_underscores(self):
-        result = derive_package_name(Path("/x/y/spec.md"), {"name": "_weather_"})
+        result = _derive_mellea_package_name(
+            Path("/x/y/spec.md"), {"name": "_weather_"}
+        )
         assert result == "weather_mellea"
 
     def test_falls_back_to_skill_for_empty_input(self):
         # Empty frontmatter name AND empty parent dir name -> safe fallback "skill".
         # Path("/spec.md").parent.name == "" so the helper's `.strip("_") or "skill"`
         # fallback kicks in.
-        result = derive_package_name(Path("/spec.md"), {"name": ""})
+        result = _derive_mellea_package_name(Path("/spec.md"), {"name": ""})
         assert result == "skill_mellea"
 
 
@@ -78,7 +88,7 @@ class TestMirrorCompanionDirs:
         (skill / "scripts" / "bash").mkdir(parents=True)
         (skill / "scripts" / "bash" / "x.sh").write_text("hello")
 
-        mirrored = mirror_companion_dirs(skill, package)
+        mirrored = mirror_dir_contents_to_target(skill, package)
 
         assert (package / "scripts" / "bash" / "x.sh").exists()
         assert (package / "scripts" / "bash" / "x.sh").read_text() == "hello"
@@ -91,7 +101,7 @@ class TestMirrorCompanionDirs:
             (skill / name).mkdir(parents=True)
             (skill / name / "file.txt").write_text(f"contents of {name}")
 
-        mirrored = mirror_companion_dirs(skill, package)
+        mirrored = mirror_dir_contents_to_target(skill, package)
 
         for name in ("scripts", "references", "assets"):
             assert (package / name / "file.txt").exists()
@@ -105,7 +115,7 @@ class TestMirrorCompanionDirs:
         (skill / "scripts").mkdir(parents=True)
         (skill / "scripts" / "x.sh").write_text("hi")
 
-        mirrored = mirror_companion_dirs(skill, package)
+        mirrored = mirror_dir_contents_to_target(skill, package)
 
         assert mirrored == ["scripts"]
         assert (package / "scripts").exists()
@@ -118,9 +128,9 @@ class TestMirrorCompanionDirs:
         (skill / "scripts").mkdir(parents=True)
         (skill / "scripts" / "x.sh").write_text("first")
 
-        first = mirror_companion_dirs(skill, package)
+        first = mirror_dir_contents_to_target(skill, package)
         # Second call must not raise (relies on dirs_exist_ok=True).
-        second = mirror_companion_dirs(skill, package)
+        second = mirror_dir_contents_to_target(skill, package)
 
         assert first == second == ["scripts"]
         assert (package / "scripts" / "x.sh").read_text() == "first"
@@ -131,7 +141,7 @@ class TestMirrorCompanionDirs:
         package = tmp_path / "nonexistent_parent" / "skill_mellea"
         assert not package.exists()
 
-        mirrored = mirror_companion_dirs(skill, package)
+        mirrored = mirror_dir_contents_to_target(skill, package)
 
         assert package.exists()
         assert package.is_dir()
@@ -142,7 +152,7 @@ class TestMirrorCompanionDirs:
         skill.mkdir()
         package = tmp_path / "skill" / "skill_mellea"
 
-        mirrored = mirror_companion_dirs(skill, package)
+        mirrored = mirror_dir_contents_to_target(skill, package)
 
         assert mirrored == []
 
