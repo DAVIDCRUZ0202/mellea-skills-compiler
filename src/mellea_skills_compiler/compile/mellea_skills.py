@@ -16,8 +16,6 @@ from rich.panel import Panel
 
 from mellea_skills_compiler.compile.claude_directives import (
     build_system_prompt,
-    derive_package_name,
-    mirror_companion_dirs,
     resolve_runtime_defaults,
     write_compile_settings,
     write_runtime_directive,
@@ -27,50 +25,30 @@ from mellea_skills_compiler.compile.grounding import (
     write_mellea_doc_index,
 )
 from mellea_skills_compiler.compile.proxy import ContextMgmtStrippingProxy
+from mellea_skills_compiler.compile.writers.renderer import render_writers
 from mellea_skills_compiler.enums import (
     ClaudeResponseMessageType,
     ClaudeResponseType,
     InferenceModel,
     SpecFileFormat,
 )
-from mellea_skills_compiler.toolkit.file_utils import parse_spec_file
+from mellea_skills_compiler.toolkit.file_utils import (
+    mirror_dir_contents_to_target,
+    parse_spec_file,
+)
 from mellea_skills_compiler.toolkit.logging import configure_logger
+
 
 LOGGER = configure_logger()
 console = Console(log_time=True)
 
-
-def _resolve_writers_repo_root(start: Path) -> Path:
-    """Walk up from ``start`` looking for a directory containing
-    ``.claude/melleafy/writers/``.
-
-    Used to locate the writers directory that the deterministic writer
-    renderer (``compile/writer_renderer.py``) reads. The caller passes in the
-    installed ``mellea_skills_compiler`` package directory (NOT the generated
-    skill package directory) so the walk-up succeeds even when the spec was
-    compiled out-of-tree.
-
-    Raises:
-        FileNotFoundError: if no ancestor directory contains
-            ``.claude/melleafy/writers/``. This indicates the compiler is
-            installed against a source tree that has been stripped of its
-            companion ``.claude/`` directory — the compile cannot proceed.
-    """
-    start = start.resolve()
-    for parent in [start, *start.parents]:
-        if (parent / ".claude" / "melleafy" / "writers").is_dir():
-            return parent
-    raise FileNotFoundError(
-        "Could not locate .claude/melleafy/writers/ relative to "
-        f"{start}. The compiler must be installed (editable or otherwise) "
-        "from a repo that contains .claude/melleafy/writers/."
-    )
+IGNORE_COMPANION_DIRS_ITEMS = ["audit", "pyproject.toml"]
 
 
-def _select_canonical_mellea_dir(skill_dir: Path, package_name: str) -> list[Path]:
-    """Return the canonical *_mellea directory list under ``skill_dir``.
+def _select_canonical_mellea_dir(spec_dir: Path, package_name: str) -> Path:
+    """Return the canonical *_mellea directory list under ``spec_dir``.
 
-    Filters ``skill_dir`` for entries ending in ``_mellea`` and resolves which
+    Filters ``spec_dir`` for entries ending in ``_mellea`` and resolves which
     one is the wrapper-canonical compiled package per the wrapper-derived
     ``package_name``. The LLM is now told the package name verbatim via
     ``build_system_prompt`` (see ``compile/claude_directives.py``), so under
@@ -81,19 +59,16 @@ def _select_canonical_mellea_dir(skill_dir: Path, package_name: str) -> list[Pat
     rendering/validating a stray sibling on filesystem-ordering coincidence.
 
     Returns:
-        A single-element list containing the canonical directory (suitable
-        for the existing ``mellea_dirs[0]`` consumers), or an empty list if
-        no ``*_mellea`` directory was produced (caller raises in that case).
+        A Path containing the canonical mellea directory
 
     Raises:
         Exception: if more than one ``*_mellea`` directory exists and none
             match ``package_name``. Cleaning up the stray sibling and
             re-running is required.
     """
+
     mellea_dirs = [
-        d
-        for d in skill_dir.iterdir()
-        if d.is_dir() and d.name.endswith("_mellea")
+        d for d in spec_dir.iterdir() if d.is_dir() and d.name.endswith("_mellea")
     ]
     if len(mellea_dirs) > 1:
         canonical = [d for d in mellea_dirs if d.name == package_name]
@@ -106,14 +81,14 @@ def _select_canonical_mellea_dir(skill_dir: Path, package_name: str) -> list[Pat
                 "frontmatter names (Rule OUT-2). Clean them up after "
                 "the compile completes.",
                 len(mellea_dirs),
-                skill_dir,
+                spec_dir,
                 canonical[0].name,
                 [d.name for d in stray],
             )
-            return canonical
+            return canonical[0]
         raise Exception(
             f"Found {len(mellea_dirs)} *_mellea directories in "
-            f"{skill_dir}, none matching the wrapper-derived "
+            f"{spec_dir}, none matching the wrapper-derived "
             f"package name {package_name!r}: "
             f"{[d.name for d in mellea_dirs]}. Remove stray "
             f"directories and re-run."
@@ -129,10 +104,14 @@ def _select_canonical_mellea_dir(skill_dir: Path, package_name: str) -> list[Pat
             mellea_dirs[0].name,
             package_name,
         )
-    return mellea_dirs
+
+    if not mellea_dirs:
+        raise Exception(f"No *_mellea directory found in {spec_dir} after compilation")
+
+    return mellea_dirs[0]
 
 
-def _get_spec_md_path(spec_path: Path):
+def _get_spec_md_path(spec_path: Path) -> Optional[Path]:
     spec_file_path = None
     if spec_path.is_dir():
         if (spec_path / SpecFileFormat.SKILL_FILE_MD).exists():
@@ -143,6 +122,24 @@ def _get_spec_md_path(spec_path: Path):
         spec_file_path = spec_path
 
     return spec_file_path
+
+
+def _derive_mellea_package_name(spec_path: Path, frontmatter: dict | None) -> str:
+    """Apply Rule OUT-2 (lowercase, hyphens/spaces → underscores, append `_mellea`).
+
+    For .md sources, prefer the frontmatter `name:` field; fall back to the
+    parent directory name. For directory inputs (multi-file runtimes), use
+    the directory name.
+    """
+    if spec_path.is_dir():
+        raw = spec_path.name
+    else:
+        raw = (frontmatter or {}).get("name") or spec_path.parent.name
+    name = str(raw).lower().replace("-", "_").replace(" ", "_")
+    while "__" in name:
+        name = name.replace("__", "_")
+    name = name.strip("_") or "skill"
+    return f"{name}_mellea"
 
 
 def validate(package_dir: Path, *, no_run: bool, all_fixtures: bool) -> None:
@@ -157,9 +154,7 @@ def validate(package_dir: Path, *, no_run: bool, all_fixtures: bool) -> None:
         for lint in lint_result.lints:
             if lint.verdict != "fail":
                 continue
-            LOGGER.error(
-                "[%s] %d failure(s):", lint.lint_id, len(lint.failures)
-            )
+            LOGGER.error("[%s] %d failure(s):", lint.lint_id, len(lint.failures))
             for failure in lint.failures:
                 location = failure.file
                 if failure.line is not None:
@@ -242,24 +237,25 @@ def compile(
             f"The skill specification file or directory cannot be found: {spec_path}"
         )
 
+    # Derive and create spec related fields
+    spec_dir = spec_path if spec_path.is_dir() else spec_path.parent
+    spec_md_path = _get_spec_md_path(spec_path)
+    try:
+        spec_frontmatter = parse_spec_file(spec_md_path).get("frontmatter")
+    except Exception as e:
+        LOGGER.warning(f"Failed to parse spec file {spec_md_path}: {e}")
+
     # print specs frontmatter if available
-    if spec_md_path := _get_spec_md_path(spec_path):
-        try:
-            specs = parse_spec_file(spec_md_path)
-            rprint(
-                Panel(
-                    json.dumps(
-                        specs.get("frontmatter", {"Name", spec_path.name}),
-                        indent=2,
-                    ),
-                    title="Specification",
-                    subtitle=str(spec_path),
-                )
-            )
-        except Exception:
-            console.print(f"Spec Path: " + str(spec_path))
-    else:
-        console.print(f"Spec Path: " + str(spec_path))
+    rprint(
+        Panel(
+            json.dumps(
+                spec_frontmatter or {"Name": spec_path.name},
+                indent=2,
+            ),
+            title="Specification",
+            subtitle=str(spec_path),
+        )
+    )
 
     # Check and verify claude model
     available_models = [model.id for model in Anthropic().models.list()]
@@ -318,34 +314,29 @@ def compile(
         "ANTHROPIC_BASE_URL": f"http://127.0.0.1:{proxy_port}",
     }
 
+    # Derive mellea package name from the spec frontmatter
+    mellea_package_name = _derive_mellea_package_name(spec_path, spec_frontmatter)
+    mellea_package_dir = spec_dir / mellea_package_name
+
     # Rule OUT-6 — mirror companion directories from skill root into the
     # package directory BEFORE invoking mellea-fy. This is deterministic
     # plumbing (not the LLM's job) so the mirror cannot be skipped or
     # mis-applied. The LLM then generates code in a package directory that
     # already contains its bundled scripts/references/assets, reinforcing
     # the Path(__file__).parent path-resolution invariant.
-    skill_dir = spec_path if spec_path.is_dir() else spec_path.parent
-    _frontmatter: dict | None = None
-    if not spec_path.is_dir() and spec_path.suffix == ".md":
-        try:
-            _frontmatter = parse_spec_file(spec_path).get("frontmatter")
-        except Exception:
-            _frontmatter = None
-    package_name = derive_package_name(spec_path, _frontmatter)
-    package_dir = skill_dir / package_name
     try:
-        mirrored = mirror_companion_dirs(skill_dir, package_dir)
+        mirrored = mirror_dir_contents_to_target(
+            spec_dir,
+            mellea_package_dir,
+            ignore_patterns=IGNORE_COMPANION_DIRS_ITEMS + [mellea_package_name],
+        )
         if mirrored:
             LOGGER.info(
-                "Mirrored companion dirs into %s/: %s (Rule OUT-6)",
-                package_name,
-                ", ".join(mirrored),
+                f"Mirrored {len(mirrored)} item(s) into {mellea_package_name}/: {', '.join(mirrored)} (Rule OUT-6)"
             )
     except Exception as mirror_exc:
         LOGGER.warning(
-            "Companion-directory mirror failed for %s: %s. mellea-fy will continue.",
-            package_dir,
-            mirror_exc,
+            f"Companion-directory mirror failed for {mellea_package_dir}: {mirror_exc}. mellea-fy will continue."
         )
 
     # Pre-populate the deterministic grounding artifacts (Steps 2.5e and 2.5f
@@ -354,7 +345,7 @@ def compile(
     # docs.mellea.ai itself. We write `mellea_api_ref.json` and
     # `mellea_doc_index.json` here; the slash command's responsibility shrinks
     # to verifying the files exist and consuming them.
-    intermediate_dir = package_dir / "intermediate"
+    intermediate_dir = mellea_package_dir / "intermediate"
     try:
         write_mellea_api_ref(intermediate_dir, refresh=refresh_cache)
         write_mellea_doc_index(intermediate_dir, refresh=refresh_cache)
@@ -366,8 +357,8 @@ def compile(
     # Resolve which backend and model the compiled skill will use at runtime,
     # record the choice for the post-compile lint, and bake the values into
     # the system prompt so the LLM puts the correct constants in config.py.
-    chosen_backend, chosen_model_id, defaults_source = (
-        resolve_runtime_defaults(skill_backend, skill_model)
+    chosen_backend, chosen_model_id, defaults_source = resolve_runtime_defaults(
+        skill_backend, skill_model
     )
     LOGGER.info(
         "Compiled skill will use backend=%r, model=%r (from %s).",
@@ -385,9 +376,6 @@ def compile(
             "the post-compile lint will skip its runtime-defaults check.",
             exc,
         )
-    system_prompt = build_system_prompt(
-        chosen_backend, chosen_model_id, defaults_source, package_name
-    )
 
     # Write the per-invocation Claude Code settings file with deny rules for
     # the paths the wrapper renders authoritatively (currently config.py).
@@ -395,7 +383,7 @@ def compile(
     # in -p mode (verified in the synthetic test).
     try:
         compile_settings_path = write_compile_settings(
-            intermediate_dir, package_dir
+            intermediate_dir, mellea_package_dir
         )
     except Exception as exc:
         LOGGER.warning(
@@ -404,6 +392,11 @@ def compile(
             exc,
         )
         compile_settings_path = None
+
+    # Build claude system prompt
+    system_prompt = build_system_prompt(
+        chosen_backend, chosen_model_id, defaults_source, mellea_package_name
+    )
 
     # Start compilation process
     process = None
@@ -479,10 +472,7 @@ def compile(
             if output:
                 try:
                     response = json.loads(output.strip())
-                    if (
-                        response.get("type", None)
-                        == ClaudeResponseType.ASSISTANT
-                    ):
+                    if response.get("type", None) == ClaudeResponseType.ASSISTANT:
                         for message_content in response.get("message", {}).get(
                             "content", []
                         ):
@@ -507,47 +497,20 @@ def compile(
                 f"Error: {' '.join(stderr_lines)}"
             )
 
-        # copy spec file into the compiled directory (name may differ from frontmatter
-        # because melleafy normalises hyphens → underscores per Rule OUT-2)
-        skill_dir = spec_path if spec_path.is_dir() else spec_path.parent
-        mellea_dirs = _select_canonical_mellea_dir(skill_dir, package_name)
-        if mellea_dirs:
-            # Wrapper-side writer invocation.
-            # Reads intermediate/<artifact>_emission.json and runs the
-            # deterministic writer in .claude/melleafy/writers/. config.py
-            # and fixtures/ are mandatory artifacts — any failure here is a
-            # hard error: the compiled package would otherwise ship without
-            # them while lints pass against the LLM-emitted files, producing
-            # a falsely-green compile.
-            import mellea_skills_compiler
-            from mellea_skills_compiler.compile.writer_renderer import (
-                default_writer_specs,
-                render_writers,
-            )
-
-            # Locate the writers directory by walking up from the
-            # *installed compiler package*, NOT from the generated
-            # package's directory. See `_resolve_writers_repo_root` for
-            # the resolution helper.
-            _compiler_pkg_dir = Path(mellea_skills_compiler.__file__).resolve().parent
-            _writers_repo_root = _resolve_writers_repo_root(_compiler_pkg_dir)
-            render_writers(
-                mellea_dirs[0],
-                default_writer_specs(_writers_repo_root),
-                enforce=True,
-            )
+        # Get the melleafy compiled directory
+        mellea_dir: Path = _select_canonical_mellea_dir(spec_dir, mellea_package_name)
+        if mellea_dir.exists():
+            # Render respective artefact writers
+            render_writers(mellea_dir, enforce=True)
 
             # validate compiled skill pipeline
-            validate(mellea_dirs[0], no_run=no_run, all_fixtures=False)
+            validate(mellea_dir, no_run=no_run, all_fixtures=False)
 
+            # copy spec file into the compiled directory
             if spec_md_path:
-                shutil.copy(
-                    spec_md_path, mellea_dirs[0] / SpecFileFormat.SKILL_FILE_MD
-                )
+                shutil.copy(spec_md_path, mellea_dir / SpecFileFormat.SKILL_FILE_MD)
         else:
-            raise Exception(
-                f"No *_mellea directory found in {skill_dir} after compilation"
-            )
+            raise Exception(f"No {mellea_dir} directory found after compilation")
 
     except (TimeoutError, subprocess.SubprocessError):
         processing.stop()
