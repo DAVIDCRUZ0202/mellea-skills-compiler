@@ -23,7 +23,7 @@ class BasePlugin(ABC):
         mellea_plugins.register(self)
 
     def deregister(self) -> None:
-        """Remove all plugins from the global registry."""
+        """Remove plugin from the global registry."""
         try:
             mellea_plugins.unregister(self)
         except (ImportError, Exception):
