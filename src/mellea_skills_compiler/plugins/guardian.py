@@ -247,7 +247,7 @@ class GuardianPlugin(BasePlugin):
         custom = [r for r in self.manifest.risks if not r.is_native]
         LOGGER.info(
             "Guardian plugin registered (%s): %d risks — %d native, %d custom criteria",
-            self._PIPELINE_MODE,
+            self._PLUGIN_MODE,
             len(self.risks),
             len(native),
             len(custom),
@@ -280,7 +280,7 @@ class GuardianAuditPlugin(
     which returns a ``GuardianEnforcePlugin`` instead.
     """
 
-    _PIPELINE_MODE = PipelineMode.AUDIT
+    _PLUGIN_MODE = PipelineMode.AUDIT
 
     def __init__(
         self,
@@ -366,7 +366,7 @@ class GuardianEnforcePlugin(
     with a PluginViolationError.
     """
 
-    _PIPELINE_MODE = PipelineMode.ENFORCE
+    _PLUGIN_MODE = PipelineMode.ENFORCE
 
     def __init__(
         self,
