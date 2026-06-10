@@ -16,6 +16,22 @@ class BasePlugin(ABC):
         self.output_dir = output_dir
 
     @abstractmethod
+    def check_input():
+        raise NotImplementedError
+
+    @abstractmethod
+    def check_output():
+        raise NotImplementedError
+
+    @abstractmethod
+    def check_tool_input():
+        raise NotImplementedError
+
+    @abstractmethod
+    def check_tool_output():
+        raise NotImplementedError
+
+    @abstractmethod
     def summary() -> dict:
         raise NotImplementedError
 

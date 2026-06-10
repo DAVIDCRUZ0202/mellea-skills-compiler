@@ -80,7 +80,7 @@ class AuditTrailPlugin(
     # ── Generation hooks ────────────────────────────────────────────
 
     @hook(HookType.GENERATION_PRE_CALL, mode=PluginMode.AUDIT)
-    async def log_pre_call(self, payload: Any, ctx: Any) -> None:
+    async def check_input(self, payload: Any, ctx: Any) -> None:
         """Log the prompt being sent to the LLM."""
         prompt = payload.prompt if hasattr(payload, "prompt") else ""
         action_preview = str(getattr(payload, "action", ""))[:200]
@@ -95,7 +95,7 @@ class AuditTrailPlugin(
         )
 
     @hook(HookType.GENERATION_POST_CALL, mode=PluginMode.AUDIT)
-    async def log_post_call(self, payload: Any, ctx: Any) -> None:
+    async def check_output(self, payload: Any, ctx: Any) -> None:
         """Log LLM output and any Guardian verdicts."""
         mot = payload.model_output
         output_text = getattr(mot, "value", "") or "" if mot else ""
@@ -188,7 +188,7 @@ class AuditTrailPlugin(
     # ── Tool hooks (Pattern 3: LLM-directed tool calls) ──────────
 
     @hook(HookType.TOOL_PRE_INVOKE, mode=PluginMode.AUDIT)
-    async def log_tool_pre(self, payload: Any, ctx: Any) -> None:
+    async def check_tool_input(self, payload: Any, ctx: Any) -> None:
         """Log tool call before execution."""
         tool_call = payload.model_tool_call
         self._write(
@@ -202,7 +202,7 @@ class AuditTrailPlugin(
         )
 
     @hook(HookType.TOOL_POST_INVOKE, mode=PluginMode.AUDIT)
-    async def log_tool_post(self, payload: Any, ctx: Any) -> None:
+    async def check_tool_output(self, payload: Any, ctx: Any) -> None:
         """Log tool result after execution."""
         tool_call = payload.model_tool_call
         tool_name = getattr(tool_call, "name", "unknown")
