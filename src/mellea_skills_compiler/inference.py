@@ -20,30 +20,27 @@ class InferenceService:
 
     @property
     def inference_engine_class(self):
-        from ai_atlas_nexus.blocks.inference import RITSInferenceEngine
+        from ai_atlas_nexus.blocks.inference import OllamaInferenceEngine
 
         if self.inference_engine_type == InferenceEngineType.OLLAMA:
-            return RITSInferenceEngine
+            return OllamaInferenceEngine
         else:
             raise ValueError(f"Invalid inference engine: {self.inference_engine_type}")
 
     @property
     def credentials(self) -> Dict[str, Any]:
         if self.inference_engine_type == InferenceEngineType.OLLAMA:
-            return {
-                "api_key": os.environ["RITS_API_KEY"],
-                "api_url": os.environ["RITS_API_URL"],
-            }
+            return {"api_url": OLLAMA_API_URL}
         else:
             raise ValueError(f"Invalid inference engine: {self.inference_engine_type}")
 
     @property
     def risk_model(self) -> str:
-        return "ibm-granite/granite-3.3-8b-instruct"
+        return InferenceModel[f"{self.inference_engine_type.name}_RISK_MODEL"]
 
     @property
     def guardian_model(self) -> str:
-        return "ibm-granite/granite-guardian-3.3-8b"
+        return InferenceModel[f"{self.inference_engine_type.name}_GUARDIAN_MODEL"]
 
     def risk(
         self,
