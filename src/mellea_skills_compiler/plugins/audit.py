@@ -48,7 +48,7 @@ class AuditTrailPlugin(
 
     def __init__(
         self,
-        output_dir: Path,
+        log_path: Path,
         guardian_plugin: Optional[
             Union[
                 GuardianAuditPlugin,
@@ -63,7 +63,6 @@ class AuditTrailPlugin(
         self._entries: list[dict] = []
 
         # audit log
-        log_path = output_dir / "audit_trail.jsonl"
         if log_path.exists():
             log_path.unlink()
         self.log_path = log_path

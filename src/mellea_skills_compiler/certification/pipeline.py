@@ -303,7 +303,7 @@ def full_pipeline(
     )
     guardian_plugin.register()
     audit_plugin = AuditTrailPlugin(
-        output_dir=output_dir, guardian_plugin=guardian_plugin
+        log_path=output_dir / "audit_trail.jsonl", guardian_plugin=guardian_plugin
     )
     audit_plugin.register()
 

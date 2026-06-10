@@ -4,11 +4,12 @@ import asyncio
 import json
 import tempfile
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import pytest
 
-from mellea_skills_compiler.plugins.audit import AuditTrailPlugin
+from mellea_skills_compiler.models import PolicyManifest
+from mellea_skills_compiler.plugins.audit import AuditTrailPlugin, GuardianAuditPlugin
 
 
 @pytest.fixture
@@ -22,44 +23,47 @@ def temp_audit_file():
 
 
 @pytest.fixture
-def audit_plugin(temp_audit_file):
+def guardian_plugin():
+    """Create an AuditTrailPlugin instance."""
+    return GuardianAuditPlugin(
+        manifest=PolicyManifest(
+            taxonomy="granite-guardian",
+            risks=[],
+            additional_risks=None,
+            use_case="test_use_case",
+        )
+    )
+
+
+@pytest.fixture
+def audit_plugin(temp_audit_file, guardian_plugin):
     """Create an AuditTrailPlugin instance."""
     return AuditTrailPlugin(
         log_path=temp_audit_file,
-        policy_id="test-policy-123",
+        guardian_plugin=guardian_plugin,
     )
 
 
 class TestAuditTrailPluginInit:
     """Test cases for AuditTrailPlugin initialization."""
 
-    def test_init_with_defaults(self, temp_audit_file):
+    def test_init_with_defaults(self, temp_audit_file, audit_plugin, guardian_plugin):
         """Test plugin initialization with default values."""
-        plugin = AuditTrailPlugin(log_path=temp_audit_file)
 
-        assert plugin.log_path == temp_audit_file
-        assert plugin.policy_id == ""
-        assert plugin._guardian_ref is None
-        assert plugin._entries == []
-
-    def test_init_with_policy_id(self, temp_audit_file):
-        """Test plugin initialization with policy ID."""
-        plugin = AuditTrailPlugin(
-            log_path=temp_audit_file,
-            policy_id="test-policy-123",
-        )
-
-        assert plugin.policy_id == "test-policy-123"
+        assert audit_plugin.log_path == temp_audit_file
+        assert audit_plugin.policy_id == "nexus-granite-guardian"
+        assert audit_plugin.guardian_plugin is guardian_plugin
+        assert audit_plugin._entries == []
 
     def test_init_with_guardian_ref(self, temp_audit_file):
         """Test plugin initialization with Guardian reference."""
         guardian_mock = MagicMock()
         plugin = AuditTrailPlugin(
             log_path=temp_audit_file,
-            guardian_ref=guardian_mock,
+            guardian_plugin=guardian_mock,
         )
 
-        assert plugin._guardian_ref is guardian_mock
+        assert plugin.guardian_plugin is guardian_mock
 
 
 class TestAuditTrailWrite:
@@ -92,7 +96,7 @@ class TestAuditTrailWrite:
 
         with open(temp_audit_file) as f:
             written_entry = json.loads(f.read())
-            assert written_entry["policy_id"] == "test-policy-123"
+            assert written_entry["policy_id"] == "nexus-granite-guardian"
 
     def test_write_multiple_entries(self, audit_plugin, temp_audit_file):
         """Test writing multiple entries."""
