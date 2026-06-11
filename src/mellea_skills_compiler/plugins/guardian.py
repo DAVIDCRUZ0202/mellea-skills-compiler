@@ -111,11 +111,11 @@ def _run_guardian_post_checks(
     """Shared logic: run Guardian checks and return (verdicts, flagged_labels)."""
     mot = payload.model_output
     if mot is None:
-        return [], []
+        return []
 
     assistant_text = getattr(mot, "value", None) or ""
     if not assistant_text:
-        return [], []
+        return []
 
     # Reconstruct the user prompt from the payload
     prompt = payload.prompt
@@ -171,7 +171,7 @@ def _run_guardian_pre_checks(
     # Extract user text from the action (CBlock or Component/Instruction)
     action = payload.action
     if action is None:
-        return [], []
+        return []
     # Instruction stores text in _description (a CBlock); CBlock has .value
     inner = (
         getattr(action, "description", None)
@@ -181,7 +181,7 @@ def _run_guardian_pre_checks(
     )
     user_text = getattr(inner, "value", None) or str(inner)
     if not user_text:
-        return [], []
+        return []
 
     verdicts: list[GuardianVerdict] = []
     flagged: list[str] = []
