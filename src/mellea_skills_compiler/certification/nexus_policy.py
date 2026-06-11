@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 from mellea_skills_compiler.enums import GovernanceTaxonomy, InferenceEngineType
 from mellea_skills_compiler.inference import InferenceService
@@ -20,7 +20,7 @@ def generate_policy_manifest(
     nexus,
     model: Optional[str] = None,
     inference_engine: InferenceEngineType = InferenceEngineType.OLLAMA,
-    governance_taxonomies: Optional[list[str]] = None,
+    governance_taxonomies: Optional[List[str]] = None,
 ) -> PolicyManifest:
     """Identify applicable risks and governance actions to produce a multi-taxonomy policy manifest.
 
@@ -57,42 +57,36 @@ def generate_policy_manifest(
     all_governance_risk_names = []
 
     for risk in identified_risks:
-        desc = risk.description or ""
-
-        guardian_prompt = desc.strip()
-        is_native = False
-
+        description = guardian_prompt = getattr(risk, "description", "").strip()
         all_governance_risk_names.append(risk.name)
 
         # sort the risks, granite guardian and other
         if risk.isDefinedByTaxonomy == GovernanceTaxonomy.IBM_GRANITE_GUARDIAN:
-            if risk.tag:
-                guardian_prompt = risk.tag
-                is_native = True
+            guardian_prompt = risk.tag if risk.tag else guardian_prompt
+            is_native = True if risk.tag else False
+            tier = "native" if is_native else "custom"
 
             nexus_risks.append(
                 NexusRisk(
                     name=risk.name,
-                    description=desc,
+                    description=description,
                     guardian_prompt=guardian_prompt,
                     is_native=is_native,
                     taxonomy=risk.isDefinedByTaxonomy,
                 )
             )
-            tier = "native" if is_native else "custom"
-            LOGGER.info(
-                "  [Guardian] %s (%s) → %s", risk.name, tier, guardian_prompt[:60]
-            )
+            LOGGER.info(f"  [Guardian] {risk.name} ({tier}) → {guardian_prompt[:60]}")
         else:
             nexus_additional_risks.append(
                 NexusRisk(
                     name=risk.name,
-                    description=desc,
+                    description=description,
                     guardian_prompt=guardian_prompt,
-                    is_native=is_native,
+                    is_native=False,
                     taxonomy=risk.isDefinedByTaxonomy,
                 )
             )
+            # LOGGER.info(f"  [Risk] {risk.name} (custom) → {guardian_prompt[:60]}")
 
     # -- 2. Use the actions which are directly linked the risks
     identified_risks_governance_actions = risk_lists.get("mixed_control_items", [])
@@ -116,8 +110,8 @@ def generate_policy_manifest(
         risks=nexus_risks,
         additional_risks=nexus_additional_risks,
         governance_actions=all_governance_actions,
-        governance_taxonomies_used=governance_taxonomies,
-        governance_risks_identified=all_governance_risk_names,
+        governance_taxonomies=governance_taxonomies,
+        governance_risk_names=all_governance_risk_names,
         model_used=risk_inference_engine.model_name_or_path,
     )
 
@@ -132,7 +126,7 @@ def generate_policy_markdown(manifest: PolicyManifest) -> str:
       - Guardrail configuration table
       - Audit trail specification
     """
-    all_taxonomies = manifest.governance_taxonomies_used
+    all_taxonomies = manifest.governance_taxonomies
     lines = [
         f"# Policy: {manifest.use_case}",
         "",

@@ -2,6 +2,7 @@ import json
 from collections import Counter
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
+from typing import List, Union
 
 from mellea_skills_compiler.enums import CoverageLevel, GovernanceTaxonomy
 from mellea_skills_compiler.toolkit.logging import configure_logger
@@ -48,25 +49,25 @@ class PolicyManifest:
     """Policy manifest linking a use case to Guardian checks + governance guidance."""
 
     use_case: str
-    taxonomy: (
-        str | list[str]
-    )  # risk taxonomy used for runtime checks (e.g. "ibm-granite-guardian")
+    taxonomy: Union[
+        str, List[str]
+    ]  # risk taxonomy used for runtime checks (e.g. "ibm-granite-guardian")
     risks: list[NexusRisk]
     additional_risks: list[NexusRisk]
     governance_actions: list[GovernanceAction] = field(default_factory=list)
-    governance_taxonomies_used: list[str] = field(default_factory=list)
-    governance_risks_identified: list[str] = field(default_factory=list)
+    governance_taxonomies: list[str] = field(default_factory=list)
+    governance_risk_names: list[str] = field(default_factory=list)
     generated_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
     model_used: str = field(default_factory=str)
 
     @property
-    def guardian_risks(self) -> list[str]:
+    def risk_prompts(self) -> list[str]:
         """List of Guardian system prompts for each identified risk."""
         return [r.guardian_prompt for r in self.risks]
 
     @property
     def risk_names(self) -> list[str]:
-        """List of risk names for logging/display."""
+        """List of Guardian risk names for logging/display."""
         return [r.name for r in self.risks]
 
     def to_dict(self) -> dict:
@@ -94,8 +95,8 @@ class PolicyManifest:
             risks=risks,
             additional_risks=additional_risks,
             governance_actions=actions,
-            governance_taxonomies_used=data.get("governance_taxonomies_used", []),
-            governance_risks_identified=data.get("governance_risks_identified", []),
+            governance_taxonomies=data.get("governance_taxonomies", []),
+            governance_risk_names=data.get("governance_risk_names", []),
             generated_at=data.get("generated_at", ""),
             model_used=data.get("model_used", ""),
         )

@@ -30,7 +30,7 @@ from __future__ import annotations
 
 import logging
 import urllib.error
-from typing import Any, Optional
+from typing import Any, List, Optional
 
 from mellea.plugins import HookType, Plugin, PluginMode, hook
 from mellea.plugins.registry import block
@@ -59,7 +59,8 @@ def _parse_guardian_score(text: str) -> str:
 
 def _call_guardian(
     user_text: str,
-    risk: str,
+    risk_label: str,
+    risk_prompt: str,
     assistant_text: Optional[str] = None,
     guardian_model: Optional[str] = None,
     inference_engine: Optional[str] = None,
@@ -86,7 +87,7 @@ def _call_guardian(
     Guardian response format: ``<score>yes</score>`` (risk detected) or
     ``<score>no</score>`` (safe).
     """
-    messages = [{"role": "system", "content": risk}]
+    messages = [{"role": "system", "content": risk_prompt}]
     if user_text:
         messages.append({"role": "user", "content": user_text})
     if assistant_text:
@@ -98,10 +99,10 @@ def _call_guardian(
         )
         raw_prediction = guardian.chat([messages], verbose=False)[0].prediction
         label = _parse_guardian_score(raw_prediction)
-        return GuardianVerdict(risk=risk, label=label, raw_output=raw_prediction)
+        return GuardianVerdict(risk=risk_label, label=label, raw_output=raw_prediction)
     except (urllib.error.URLError, urllib.error.HTTPError, KeyError) as e:
-        LOGGER.warning("Guardian call failed for risk=%s: %s", risk, e)
-        return GuardianVerdict(risk=risk, label="Failed", raw_output=str(e))
+        LOGGER.warning("Guardian call failed for risk=%s: %s", risk_prompt, e)
+        return GuardianVerdict(risk=risk_label, label="Failed", raw_output=str(e))
 
 
 def _run_guardian_post_checks(
@@ -129,11 +130,15 @@ def _run_guardian_post_checks(
 
     verdicts: list[GuardianVerdict] = []
     flagged: list[str] = []
-    for risk_prompt, risk_label in zip(plugin.risks, plugin.risk_labels):
+    for risk_prompt, risk_label in zip(plugin.risk_prompts, plugin.risk_labels):
         verdict = _call_guardian(
-            user_text, risk_prompt, assistant_text, guardian_model, inference_engine
+            user_text,
+            risk_label,
+            risk_prompt,
+            assistant_text,
+            guardian_model,
+            inference_engine,
         )
-        verdict.risk = risk_label
         verdicts.append(verdict)
         level = logging.WARNING if verdict.label == "Yes" else logging.INFO
         LOGGER.log(
@@ -143,8 +148,6 @@ def _run_guardian_post_checks(
             verdict.label,
             assistant_text.replace("\n", " "),
         )
-        if verdict.label == "Yes":
-            flagged.append(risk_label)
 
     plugin.all_verdicts.extend(verdicts)
 
@@ -155,7 +158,7 @@ def _run_guardian_post_checks(
         for v in verdicts
     ]
 
-    return verdicts, flagged
+    return verdicts
 
 
 def _run_guardian_pre_checks(
@@ -182,11 +185,10 @@ def _run_guardian_pre_checks(
 
     verdicts: list[GuardianVerdict] = []
     flagged: list[str] = []
-    for risk_prompt, risk_label in zip(plugin.risks, plugin.risk_labels):
+    for risk_prompt, risk_label in zip(plugin.risk_prompts, plugin.risk_labels):
         verdict = _call_guardian(
-            user_text, risk_prompt, None, guardian_model, inference_engine
+            user_text, risk_label, risk_prompt, None, guardian_model, inference_engine
         )  # no assistant text
-        verdict.risk = risk_label
         verdicts.append(verdict)
         level = logging.WARNING if verdict.label == "Yes" else logging.INFO
         LOGGER.log(
@@ -196,11 +198,9 @@ def _run_guardian_pre_checks(
             verdict.label,
             user_text.replace("\n", " "),
         )
-        if verdict.label == "Yes":
-            flagged.append(risk_label)
 
     plugin.all_verdicts.extend(verdicts)
-    return verdicts, flagged
+    return verdicts
 
 
 class GuardianPluginFactory:
@@ -234,17 +234,21 @@ class GuardianPlugin(BasePlugin):
         """
 
         self.manifest = manifest
-        self.risks = manifest.guardian_risks or ["harm", "social_bias", "jailbreak"]
-        self.risk_labels = manifest.risk_names or self.risks
-        self.all_verdicts: list[GuardianVerdict] = []
+        self.risks = manifest.risks
+        self.risk_prompts = manifest.risk_prompts or [
+            "harm",
+            "social_bias",
+            "jailbreak",
+        ]
+        self.risk_labels = manifest.risk_names
+        self.all_verdicts: List[GuardianVerdict] = []
         self.guardian_model = guardian_model
         self.inference_engine = inference_engine
 
     def register(self) -> None:
-
         # Log tier breakdown for transparency
-        native = [r for r in self.manifest.risks if r.is_native]
-        custom = [r for r in self.manifest.risks if not r.is_native]
+        native = [r for r in self.risks if r.is_native]
+        custom = [r for r in self.risks if not r.is_native]
         LOGGER.info(
             "Guardian plugin registered (%s): %d risks — %d native, %d custom criteria",
             self._PLUGIN_MODE,
@@ -336,15 +340,15 @@ class GuardianAuditPlugin(
         if not (not tool_output or not payload.success):
             # Run Guardian checks on the tool output (treat as assistant text)
             verdicts: list[GuardianVerdict] = []
-            for risk_prompt, risk_label in zip(self.risks, self.risk_labels):
+            for risk_prompt, risk_label in zip(self.risk_prompts, self.risk_labels):
                 verdict = _call_guardian(
                     user_text=f"Tool {tool_name} was called",
-                    risk=risk_prompt,
+                    risk_label=f"tool:{risk_label}",
+                    risk_prompt=risk_prompt,
                     assistant_text=tool_output[:2000],
                     guardian_model=self.guardian_model,
                     inference_engine=self.inference_engine,
                 )
-                verdict.risk = f"tool:{risk_label}"
                 verdicts.append(verdict)
                 if verdict.label == "Yes":
                     LOGGER.warning(
@@ -379,9 +383,10 @@ class GuardianEnforcePlugin(
     @hook(HookType.GENERATION_PRE_CALL, mode=PluginMode.SEQUENTIAL)
     async def enforce_input(self, payload: Any, ctx: Any) -> Any:
         """Pre-generation: block if input prompt has risks."""
-        verdicts, flagged = _run_guardian_pre_checks(
+        verdicts: List[GuardianVerdict] = _run_guardian_pre_checks(
             self, payload, self.guardian_model, self.inference_engine
         )
+        flagged = [v.risk for v in verdicts if v.label == "Yes"]
         if flagged:
             risk_list = ", ".join(flagged)
             LOGGER.warning(
@@ -397,9 +402,10 @@ class GuardianEnforcePlugin(
     @hook(HookType.GENERATION_POST_CALL, mode=PluginMode.SEQUENTIAL)
     async def enforce_output(self, payload: Any, ctx: Any) -> Any:
         """Post-generation: block if LLM output has risks."""
-        verdicts, flagged = _run_guardian_post_checks(
+        verdicts = _run_guardian_post_checks(
             self, payload, self.guardian_model, self.inference_engine
         )
+        flagged = [v.risk for v in verdicts if v.label == "Yes"]
         if flagged:
             risk_list = ", ".join(flagged)
             LOGGER.warning(
@@ -432,20 +438,19 @@ class GuardianEnforcePlugin(
             return None
 
         # Run Guardian checks on tool output
-        flagged: list[str] = []
-        for risk_prompt, risk_label in zip(self.risks, self.risk_labels):
+        verdicts: list[GuardianVerdict] = []
+        for risk_prompt, risk_label in zip(self.risk_prompts, self.risk_labels):
             verdict = _call_guardian(
                 user_text=f"Tool {tool_name} was called",
-                risk=risk_prompt,
+                risk_label=f"tool:{risk_label}",
+                risk_prompt=risk_prompt,
                 assistant_text=tool_output[:2000],
                 guardian_model=self.guardian_model,
                 inference_engine=self.inference_engine,
             )
-            verdict.risk = f"tool:{risk_label}"
-            self.all_verdicts.append(verdict)
-            if verdict.label == "Yes":
-                flagged.append(risk_label)
+            verdicts.append(verdict)
 
+        flagged = [v.risk for v in verdicts if v.label == "Yes"]
         if flagged:
             risk_list = ", ".join(flagged)
             LOGGER.warning(
