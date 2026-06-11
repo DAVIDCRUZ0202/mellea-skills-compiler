@@ -58,9 +58,9 @@ def _parse_guardian_score(text: str) -> str:
 
 
 def _call_guardian(
+    risk_prompts: List[str],
+    risk_labels: List[str],
     user_text: str,
-    risk_label: str,
-    risk_prompt: str,
     assistant_text: Optional[str] = None,
     guardian_model: Optional[str] = None,
     inference_engine: Optional[str] = None,
@@ -87,22 +87,39 @@ def _call_guardian(
     Guardian response format: ``<score>yes</score>`` (risk detected) or
     ``<score>no</score>`` (safe).
     """
-    messages = [{"role": "system", "content": risk_prompt}]
-    if user_text:
-        messages.append({"role": "user", "content": user_text})
-    if assistant_text:
-        messages.append({"role": "assistant", "content": assistant_text})
+
+    all_messages = []
+    for risk_prompt in risk_prompts:
+        messages = [{"role": "system", "content": risk_prompt}]
+        if user_text:
+            messages.append({"role": "user", "content": user_text})
+        if assistant_text:
+            messages.append({"role": "assistant", "content": assistant_text})
+        all_messages.append(messages)
 
     try:
         guardian = InferenceService(inference_engine).guardian(
             guardian_model, parameters={"temperature": 0}
         )
-        raw_prediction = guardian.chat([messages], verbose=False)[0].prediction
-        label = _parse_guardian_score(raw_prediction)
-        return GuardianVerdict(risk=risk_label, label=label, raw_output=raw_prediction)
+        raw_predictions = guardian.chat(all_messages, verbose=True)
+        labels = [
+            _parse_guardian_score(raw_prediction.prediction)
+            for raw_prediction in raw_predictions
+        ]
+        verdicts = [
+            GuardianVerdict(
+                risk=risk_label, label=label, raw_output=raw_prediction.prediction
+            )
+            for risk_label, label, raw_prediction in zip(
+                risk_labels,
+                labels,
+                raw_predictions,
+            )
+        ]
+        return verdicts
     except (urllib.error.URLError, urllib.error.HTTPError, KeyError) as e:
         LOGGER.warning("Guardian call failed for risk=%s: %s", risk_prompt, e)
-        return GuardianVerdict(risk=risk_label, label="Failed", raw_output=str(e))
+        return []
 
 
 def _run_guardian_post_checks(
@@ -128,28 +145,26 @@ def _run_guardian_post_checks(
     else:
         user_text = str(prompt) if prompt else ""
 
-    verdicts: list[GuardianVerdict] = []
-    flagged: list[str] = []
-    for risk_prompt, risk_label in zip(plugin.risk_prompts, plugin.risk_labels):
-        verdict = _call_guardian(
-            user_text,
-            risk_label,
-            risk_prompt,
-            assistant_text,
-            guardian_model,
-            inference_engine,
-        )
-        verdicts.append(verdict)
-        level = logging.WARNING if verdict.label == "Yes" else logging.INFO
+    verdicts: List[GuardianVerdict] = _call_guardian(
+        plugin.risk_labels,
+        plugin.risk_prompts,
+        user_text,
+        assistant_text,
+        guardian_model,
+        inference_engine,
+    )
+    for verdict in verdicts:
         LOGGER.log(
-            level,
+            (
+                logging.WARNING
+                if verdict.label == "Yes"
+                else (logging.ERROR if verdict.label == "Failed" else logging.INFO)
+            ),
             "[guardian-post] risk=%s label=%s output_preview=%.60s",
-            risk_label,
+            verdict.risk,
             verdict.label,
             assistant_text.replace("\n", " "),
         )
-
-    plugin.all_verdicts.extend(verdicts)
 
     # Stash verdicts in user_metadata for audit_trail_hook to pick up
     meta = dict(payload.user_metadata)
@@ -158,6 +173,7 @@ def _run_guardian_post_checks(
         for v in verdicts
     ]
 
+    plugin.all_verdicts.extend(verdicts)
     return verdicts
 
 
@@ -168,33 +184,41 @@ def _run_guardian_pre_checks(
 
     Follows the GAF-Guard pattern — system + user only, no assistant turn.
     """
-    # Extract user text from the action (CBlock or Component/Instruction)
+
+    # Extract action from the CBlock or Component/Instruction
     action = payload.action
     if action is None:
         return []
-    # Instruction stores text in _description (a CBlock); CBlock has .value
-    inner = (
+
+    # Extract user text
+    user_text = (
         getattr(action, "description", None)
         or getattr(action, "_description", None)
         or getattr(action, "_arguments", None)
         or action
     )
-    user_text = getattr(inner, "value", None) or str(inner)
+    user_text = getattr(user_text, "value", None) or str(user_text)
     if not user_text:
         return []
 
-    verdicts: list[GuardianVerdict] = []
-    flagged: list[str] = []
-    for risk_prompt, risk_label in zip(plugin.risk_prompts, plugin.risk_labels):
-        verdict = _call_guardian(
-            user_text, risk_label, risk_prompt, None, guardian_model, inference_engine
-        )  # no assistant text
-        verdicts.append(verdict)
-        level = logging.WARNING if verdict.label == "Yes" else logging.INFO
+    assistant_text = None
+    verdicts: List[GuardianVerdict] = _call_guardian(
+        plugin.risk_prompts,
+        plugin.risk_labels,
+        user_text,
+        assistant_text,
+        guardian_model,
+        inference_engine,
+    )
+    for verdict in verdicts:
         LOGGER.log(
-            level,
+            (
+                logging.WARNING
+                if verdict.label == "Yes"
+                else (logging.ERROR if verdict.label == "Failed" else logging.INFO)
+            ),
             "[guardian-pre] risk=%s label=%s input_preview=%.60s",
-            risk_label,
+            verdict.risk,
             verdict.label,
             user_text.replace("\n", " "),
         )

@@ -264,18 +264,12 @@ def full_pipeline(
     use_case = skill_to_use_case(parsed, sensitivity)
     LOGGER.info(f"  Description: {use_case}")
 
-    # LOGGER.info("  Name: %s", frontmatter.get("name", "unknown"))
-    # LOGGER.info("  Tools: %s", frontmatter.get("allowed-tools", []))
-    # LOGGER.info("  Sensitivity: %s", sensitivity["tier_display"])
-    # LOGGER.info("  Use-case: %.100s...", use_case)
-
-    # ── Generate policy manifest using Nexus ────────────────────
+    # ── Generate policy manifest using AI Atlas Nexus ────────────────────
     print()
     LOGGER.info("Identifying risks via AI Atlas Nexus...")
     nexus_data_path = get_data_path()
     nexus = AIAtlasNexus(base_dir=nexus_data_path)
     manifest = generate_policy_manifest(use_case, nexus, model, inference_engine)
-
     manifest_path = output_dir / "policy_manifest.json"
     manifest.to_json(manifest_path)
 
@@ -310,7 +304,9 @@ def full_pipeline(
     # ── Step 4: Run the decomposed pipeline ───────────────────────────
     print()
     LOGGER.info("Running decomposed pipeline from %s...", pipeline_dir.name)
-    LOGGER.info("Guardian checks every generation (pre + post).")
+    LOGGER.info(f"  - Fixture: {fixture["id"]}")
+    LOGGER.info("  - Guardian checks every generation (pre + post).")
+    LOGGER.info("  - Audit Trail checks every end points (pre + post).")
 
     try:
         # run the given fixture

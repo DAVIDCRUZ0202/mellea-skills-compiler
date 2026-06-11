@@ -1,4 +1,5 @@
 import json
+import logging
 from collections import Counter
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
@@ -143,5 +144,5 @@ class GuardianVerdict:
 
     risk: str
     label: str  # "Yes" (risk detected), "No" (safe), "Failed"
-    raw_output: str = ""
+    raw_output: str
     timestamp: str = field(default_factory=lambda: datetime.now(UTC).isoformat())

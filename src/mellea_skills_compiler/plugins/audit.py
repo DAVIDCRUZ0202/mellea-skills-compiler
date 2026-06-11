@@ -79,10 +79,9 @@ class AuditTrailPlugin(
 
     # ── Generation hooks ────────────────────────────────────────────
 
-    @hook(HookType.GENERATION_PRE_CALL, mode=PluginMode.AUDIT)
+    @hook(HookType.GENERATION_PRE_CALL, mode=PluginMode.FIRE_AND_FORGET)
     async def check_input(self, payload: Any, ctx: Any) -> None:
         """Log the prompt being sent to the LLM."""
-        prompt = payload.prompt if hasattr(payload, "prompt") else ""
         action_preview = str(getattr(payload, "action", ""))[:200]
         self._write(
             {
@@ -94,7 +93,7 @@ class AuditTrailPlugin(
             }
         )
 
-    @hook(HookType.GENERATION_POST_CALL, mode=PluginMode.AUDIT)
+    @hook(HookType.GENERATION_POST_CALL, mode=PluginMode.FIRE_AND_FORGET)
     async def check_output(self, payload: Any, ctx: Any) -> None:
         """Log LLM output and any Guardian verdicts."""
         mot = payload.model_output
@@ -140,7 +139,7 @@ class AuditTrailPlugin(
 
     # ── Component hooks ─────────────────────────────────────────────
 
-    @hook(HookType.COMPONENT_PRE_EXECUTE, mode=PluginMode.AUDIT)
+    @hook(HookType.COMPONENT_PRE_EXECUTE, mode=PluginMode.FIRE_AND_FORGET)
     async def log_component_start(self, payload: Any, ctx: Any) -> None:
         self._write(
             {
@@ -150,7 +149,7 @@ class AuditTrailPlugin(
             }
         )
 
-    @hook(HookType.COMPONENT_POST_SUCCESS, mode=PluginMode.AUDIT)
+    @hook(HookType.COMPONENT_POST_SUCCESS, mode=PluginMode.FIRE_AND_FORGET)
     async def log_component_success(self, payload: Any, ctx: Any) -> None:
         self._write(
             {
@@ -161,7 +160,7 @@ class AuditTrailPlugin(
             }
         )
 
-    @hook(HookType.COMPONENT_POST_ERROR, mode=PluginMode.AUDIT)
+    @hook(HookType.COMPONENT_POST_ERROR, mode=PluginMode.FIRE_AND_FORGET)
     async def log_component_error(self, payload: Any, ctx: Any) -> None:
         self._write(
             {
@@ -174,7 +173,7 @@ class AuditTrailPlugin(
 
     # ── Validation hooks ────────────────────────────────────────────
 
-    @hook(HookType.VALIDATION_POST_CHECK, mode=PluginMode.AUDIT)
+    @hook(HookType.VALIDATION_POST_CHECK, mode=PluginMode.FIRE_AND_FORGET)
     async def log_validation(self, payload: Any, ctx: Any) -> None:
         self._write(
             {
@@ -187,7 +186,7 @@ class AuditTrailPlugin(
 
     # ── Tool hooks (Pattern 3: LLM-directed tool calls) ──────────
 
-    @hook(HookType.TOOL_PRE_INVOKE, mode=PluginMode.AUDIT)
+    @hook(HookType.TOOL_PRE_INVOKE, mode=PluginMode.FIRE_AND_FORGET)
     async def check_tool_input(self, payload: Any, ctx: Any) -> None:
         """Log tool call before execution."""
         tool_call = payload.model_tool_call
@@ -201,7 +200,7 @@ class AuditTrailPlugin(
             }
         )
 
-    @hook(HookType.TOOL_POST_INVOKE, mode=PluginMode.AUDIT)
+    @hook(HookType.TOOL_POST_INVOKE, mode=PluginMode.FIRE_AND_FORGET)
     async def check_tool_output(self, payload: Any, ctx: Any) -> None:
         """Log tool result after execution."""
         tool_call = payload.model_tool_call
