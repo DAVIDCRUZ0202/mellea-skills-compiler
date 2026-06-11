@@ -102,8 +102,8 @@ class TestPolicyManifest:
             risks=risks,
             additional_risks=[],
             governance_actions=actions,
-            governance_taxonomies_used=["nist-ai-rmf"],
-            governance_risks_identified=["Risk1"],
+            governance_taxonomies=["nist-ai-rmf"],
+            governance_risk_names=["Risk1"],
         )
 
         assert manifest.use_case == "Test use case"
@@ -135,7 +135,7 @@ class TestPolicyManifest:
             additional_risks=[],
         )
 
-        guardian_risks = manifest.guardian_risks
+        guardian_risks = manifest.risk_prompts
         assert guardian_risks == ["prompt1", "prompt2"]
 
     def test_risk_names_property(self):
@@ -269,8 +269,8 @@ class TestPolicyManifest:
                     "via_risk": "TestRisk",
                 }
             ],
-            "governance_taxonomies_used": ["nist-ai-rmf"],
-            "governance_risks_identified": ["Risk1"],
+            "governance_taxonomies": ["nist-ai-rmf"],
+            "governance_risk_names": ["Risk1"],
             "generated_at": datetime.now(UTC).isoformat(),
             "model_used": "test-model",
         }

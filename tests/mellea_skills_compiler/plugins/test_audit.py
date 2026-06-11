@@ -127,7 +127,7 @@ class TestAuditTrailHooks:
 
         ctx = MagicMock()
 
-        asyncio.run(audit_plugin.log_pre_call(payload, ctx))
+        asyncio.run(audit_plugin.check_input(payload, ctx))
 
         assert len(audit_plugin._entries) == 1
         entry = audit_plugin._entries[0]
@@ -151,7 +151,7 @@ class TestAuditTrailHooks:
 
         ctx = MagicMock()
 
-        asyncio.run(audit_plugin.log_post_call(payload, ctx))
+        asyncio.run(audit_plugin.check_output(payload, ctx))
 
         assert len(audit_plugin._entries) == 1
         entry = audit_plugin._entries[0]
@@ -176,7 +176,7 @@ class TestAuditTrailHooks:
 
         ctx = MagicMock()
 
-        asyncio.run(audit_plugin.log_post_call(payload, ctx))
+        asyncio.run(audit_plugin.check_output(payload, ctx))
 
         entry = audit_plugin._entries[0]
         assert entry["risk_detected"] is True
@@ -257,7 +257,7 @@ class TestAuditTrailHooks:
 
         ctx = MagicMock()
 
-        asyncio.run(audit_plugin.log_tool_pre(payload, ctx))
+        asyncio.run(audit_plugin.check_tool_input(payload, ctx))
 
         entry = audit_plugin._entries[0]
         assert entry["hook"] == "tool_pre_invoke"
@@ -280,7 +280,7 @@ class TestAuditTrailHooks:
 
         ctx = MagicMock()
 
-        asyncio.run(audit_plugin.log_tool_post(payload, ctx))
+        asyncio.run(audit_plugin.check_tool_output(payload, ctx))
 
         entry = audit_plugin._entries[0]
         assert entry["hook"] == "tool_post_invoke"
@@ -314,7 +314,7 @@ class TestAuditTrailSummary:
             "guardian_verdicts": [{"risk": "test", "label": "No"}]
         }
 
-        asyncio.run(audit_plugin.log_post_call(gen_payload, MagicMock()))
+        asyncio.run(audit_plugin.check_output(gen_payload, MagicMock()))
 
         # Add tool entry
         tool_call = MagicMock()
@@ -329,7 +329,7 @@ class TestAuditTrailSummary:
         tool_payload.success = True
         tool_payload.error = None
 
-        asyncio.run(audit_plugin.log_tool_post(tool_payload, MagicMock()))
+        asyncio.run(audit_plugin.check_tool_output(tool_payload, MagicMock()))
 
         summary = audit_plugin.summary()
 
@@ -349,7 +349,7 @@ class TestAuditTrailSummary:
             "guardian_verdicts": [{"risk": "test", "label": "Yes"}]
         }
 
-        asyncio.run(audit_plugin.log_post_call(payload, MagicMock()))
+        asyncio.run(audit_plugin.check_output(payload, MagicMock()))
 
         summary = audit_plugin.summary()
 
