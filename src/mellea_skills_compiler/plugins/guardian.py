@@ -159,7 +159,7 @@ def _run_guardian_post_checks(
     )
     for verdict in verdicts:
         LOGGER.log(
-            logging.WARNING if verdict.label in ["Yes", "Failed"] else logging.INFO,
+            logging.WARNING if verdict.label == "Yes" else logging.INFO,
             "[guardian-post] risk=%s label=%s output_preview=%.60s",
             verdict.risk,
             verdict.label,
