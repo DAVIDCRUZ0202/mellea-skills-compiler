@@ -57,18 +57,17 @@ class PolicyManifest:
     additional_risks: list[NexusRisk]
     governance_actions: list[GovernanceAction] = field(default_factory=list)
     governance_taxonomies: list[str] = field(default_factory=list)
-    governance_risk_names: list[str] = field(default_factory=list)
     generated_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
-    model_used: str = field(default_factory=str)
+    model: str = field(default_factory=str)
 
     @property
     def risk_prompts(self) -> list[str]:
-        """List of Guardian system prompts for each identified risk."""
+        """List of Guardian prompts for each identified risk."""
         return [r.guardian_prompt for r in self.risks]
 
     @property
     def risk_names(self) -> list[str]:
-        """List of Guardian risk names for logging/display."""
+        """List of Guardian risk names for each identified risk."""
         return [r.name for r in self.risks]
 
     def to_dict(self) -> dict:
@@ -89,17 +88,18 @@ class PolicyManifest:
             data = json.load(f)
         risks = [NexusRisk(**r) for r in data.get("risks", [])]
         additional_risks = [NexusRisk(**r) for r in data.get("additional_risks", [])]
-        actions = [GovernanceAction(**a) for a in data.get("governance_actions", [])]
+        governance_actions = [
+            GovernanceAction(**a) for a in data.get("governance_actions", [])
+        ]
         return cls(
             use_case=data.get("use_case", ""),
             taxonomy=data.get("taxonomy", GovernanceTaxonomy.IBM_GRANITE_GUARDIAN),
             risks=risks,
             additional_risks=additional_risks,
-            governance_actions=actions,
+            governance_actions=governance_actions,
             governance_taxonomies=data.get("governance_taxonomies", []),
-            governance_risk_names=data.get("governance_risk_names", []),
             generated_at=data.get("generated_at", ""),
-            model_used=data.get("model_used", ""),
+            model=data.get("model", ""),
         )
 
 

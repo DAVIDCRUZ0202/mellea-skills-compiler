@@ -35,9 +35,13 @@ from typing import Any, List, Optional
 from mellea.plugins import HookType, Plugin, PluginMode, hook
 from mellea.plugins.registry import block
 
-from mellea_skills_compiler.enums import InferenceEngineType, PipelineMode
+from mellea_skills_compiler.enums import (
+    GovernanceTaxonomy,
+    InferenceEngineType,
+    PipelineMode,
+)
 from mellea_skills_compiler.inference import InferenceService
-from mellea_skills_compiler.models import GuardianVerdict, PolicyManifest
+from mellea_skills_compiler.models import GuardianVerdict, NexusRisk, PolicyManifest
 from mellea_skills_compiler.plugins import BasePlugin
 from mellea_skills_compiler.toolkit.logging import configure_logger
 
@@ -58,13 +62,12 @@ def _parse_guardian_score(text: str) -> str:
 
 
 def _call_guardian(
-    risk_prompts: List[str],
-    risk_labels: List[str],
+    risks: List[NexusRisk],
     user_text: str,
     assistant_text: Optional[str] = None,
     guardian_model: Optional[str] = None,
     inference_engine: Optional[str] = None,
-) -> GuardianVerdict:
+) -> List[GuardianVerdict]:
     """Synchronous call to Guardian.
 
     Guardian expects a chat with the user turn (+ optional assistant turn)
@@ -89,8 +92,10 @@ def _call_guardian(
     """
 
     all_messages = []
-    for risk_prompt in risk_prompts:
-        messages = [{"role": "system", "content": risk_prompt}]
+    guardian_prompts = [r.guardian_prompt for r in risks]
+    risk_names = [r.name for r in risks]
+    for guardian_prompt in guardian_prompts:
+        messages = [{"role": "system", "content": guardian_prompt}]
         if user_text:
             messages.append({"role": "user", "content": user_text})
         if assistant_text:
@@ -108,29 +113,29 @@ def _call_guardian(
         ]
         verdicts = [
             GuardianVerdict(
-                risk=risk_label, label=label, raw_output=raw_prediction.prediction
+                risk=risk_name, label=label, raw_output=raw_prediction.prediction
             )
-            for risk_label, label, raw_prediction in zip(
-                risk_labels,
+            for risk_name, label, raw_prediction in zip(
+                risk_names,
                 labels,
                 raw_predictions,
             )
         ]
         return verdicts
     except (urllib.error.URLError, urllib.error.HTTPError, KeyError) as e:
-        LOGGER.warning("Guardian call failed for risk=%s: %s", risk_prompt, e)
+        LOGGER.warning("Guardian call failed for risks=%s: %s", risk_names, e)
         return []
 
 
 def _run_guardian_post_checks(
-    plugin: GuardianPlugin, payload: Any, guardian_model: str, inference_engine: str
-) -> tuple[list[GuardianVerdict], list[str]]:
+    payload: Any, risks: List[NexusRisk], guardian_model: str, inference_engine: str
+) -> List[GuardianVerdict]:
     """Shared logic: run Guardian checks and return (verdicts, flagged_labels)."""
-    mot = payload.model_output
-    if mot is None:
+    model_output = payload.model_output
+    if model_output is None:
         return []
 
-    assistant_text = getattr(mot, "value", None) or ""
+    assistant_text = getattr(model_output, "value", None) or ""
     if not assistant_text:
         return []
 
@@ -146,8 +151,7 @@ def _run_guardian_post_checks(
         user_text = str(prompt) if prompt else ""
 
     verdicts: List[GuardianVerdict] = _call_guardian(
-        plugin.risk_labels,
-        plugin.risk_prompts,
+        risks,
         user_text,
         assistant_text,
         guardian_model,
@@ -155,11 +159,7 @@ def _run_guardian_post_checks(
     )
     for verdict in verdicts:
         LOGGER.log(
-            (
-                logging.WARNING
-                if verdict.label == "Yes"
-                else (logging.ERROR if verdict.label == "Failed" else logging.INFO)
-            ),
+            logging.WARNING if verdict.label in ["Yes", "Failed"] else logging.INFO,
             "[guardian-post] risk=%s label=%s output_preview=%.60s",
             verdict.risk,
             verdict.label,
@@ -173,13 +173,12 @@ def _run_guardian_post_checks(
         for v in verdicts
     ]
 
-    plugin.all_verdicts.extend(verdicts)
     return verdicts
 
 
 def _run_guardian_pre_checks(
-    plugin: GuardianPlugin, payload: Any, guardian_model: str, inference_engine: str
-) -> tuple[list[GuardianVerdict], list[str]]:
+    payload: Any, risks: List[NexusRisk], guardian_model: str, inference_engine: str
+) -> List[GuardianVerdict]:
     """Pre-generation check: assess the input prompt before LLM generation.
 
     Follows the GAF-Guard pattern — system + user only, no assistant turn.
@@ -203,8 +202,7 @@ def _run_guardian_pre_checks(
 
     assistant_text = None
     verdicts: List[GuardianVerdict] = _call_guardian(
-        plugin.risk_prompts,
-        plugin.risk_labels,
+        risks,
         user_text,
         assistant_text,
         guardian_model,
@@ -222,8 +220,6 @@ def _run_guardian_pre_checks(
             verdict.label,
             user_text.replace("\n", " "),
         )
-
-    plugin.all_verdicts.extend(verdicts)
     return verdicts
 
 
@@ -257,20 +253,29 @@ class GuardianPlugin(BasePlugin):
             inference_engine: The inference engine, defaults to Ollama
         """
 
-        self.manifest = manifest
-        self.risks = manifest.risks
-        self.risk_prompts = manifest.risk_prompts or [
-            "harm",
-            "social_bias",
-            "jailbreak",
-        ]
-        self.risk_labels = manifest.risk_names
+        self.risks = manifest.risks or self.get_default_risks()
+        self.taxonomy = manifest.taxonomy
         self.all_verdicts: List[GuardianVerdict] = []
         self.guardian_model = guardian_model
         self.inference_engine = inference_engine
 
+    def get_default_risks(self):
+        return [
+            NexusRisk(
+                name=risk,
+                description="",
+                guardian_prompt=risk,
+                is_native=True,
+                taxonomy=GovernanceTaxonomy.IBM_GRANITE_GUARDIAN,
+            )
+            for risk in [
+                "harm",
+                "social_bias",
+                "jailbreak",
+            ]
+        ]
+
     def register(self) -> None:
-        # Log tier breakdown for transparency
         native = [r for r in self.risks if r.is_native]
         custom = [r for r in self.risks if not r.is_native]
         LOGGER.info(
@@ -289,7 +294,7 @@ class GuardianPlugin(BasePlugin):
 
     def summary(self) -> dict:
         return {
-            "total_verdicts": len(self.all_verdicts),
+            "all_verdicts": self.all_verdicts,
             "flagged_verdicts": [v for v in self.all_verdicts if v.label == "Yes"],
             "passed_verdicts": [v for v in self.all_verdicts if v.label == "No"],
             "failed_verdicts": [v for v in self.all_verdicts if v.label == "Failed"],
@@ -321,16 +326,18 @@ class GuardianAuditPlugin(
     @hook(HookType.GENERATION_PRE_CALL, mode=PluginMode.AUDIT)
     async def check_input(self, payload: Any, ctx: Any) -> None:
         """Pre-generation: assess input prompt for risks (observe-only)."""
-        _run_guardian_pre_checks(
-            self, payload, self.guardian_model, self.inference_engine
+        verdicts = _run_guardian_pre_checks(
+            payload, self.risks, self.guardian_model, self.inference_engine
         )
+        self.all_verdicts.extend(verdicts)
 
     @hook(HookType.GENERATION_POST_CALL, mode=PluginMode.AUDIT)
     async def check_output(self, payload: Any, ctx: Any) -> None:
         """Post-generation: assess LLM output for risks (observe-only)."""
-        _run_guardian_post_checks(
-            self, payload, self.guardian_model, self.inference_engine
+        verdicts = _run_guardian_post_checks(
+            payload, self.risks, self.guardian_model, self.inference_engine
         )
+        self.all_verdicts.extend(verdicts)
 
     @hook(HookType.TOOL_PRE_INVOKE, mode=PluginMode.AUDIT)
     async def check_tool_input(self, payload: Any, ctx: Any) -> None:
@@ -408,7 +415,7 @@ class GuardianEnforcePlugin(
     async def enforce_input(self, payload: Any, ctx: Any) -> Any:
         """Pre-generation: block if input prompt has risks."""
         verdicts: List[GuardianVerdict] = _run_guardian_pre_checks(
-            self, payload, self.guardian_model, self.inference_engine
+            payload, self.risks, self.guardian_model, self.inference_engine
         )
         flagged = [v.risk for v in verdicts if v.label == "Yes"]
         if flagged:
@@ -427,7 +434,7 @@ class GuardianEnforcePlugin(
     async def enforce_output(self, payload: Any, ctx: Any) -> Any:
         """Post-generation: block if LLM output has risks."""
         verdicts = _run_guardian_post_checks(
-            self, payload, self.guardian_model, self.inference_engine
+            payload, self.risks, self.guardian_model, self.inference_engine
         )
         flagged = [v.risk for v in verdicts if v.label == "Yes"]
         if flagged:

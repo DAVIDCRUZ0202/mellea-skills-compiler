@@ -18,7 +18,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Optional, Union
 
-from mellea import plugins as mellea_plugins
 from mellea.plugins import HookType, Plugin, PluginMode, hook
 
 from mellea_skills_compiler.plugins import BasePlugin
@@ -57,9 +56,7 @@ class AuditTrailPlugin(
         ] = None,
     ):
         self.guardian_plugin = guardian_plugin
-        self.policy_id = (
-            f"nexus-{guardian_plugin.manifest.taxonomy}" if guardian_plugin else ""
-        )
+        self.policy_id = f"nexus-{guardian_plugin.taxonomy}" if guardian_plugin else ""
         self._entries: list[dict] = []
 
         # audit log
@@ -80,7 +77,7 @@ class AuditTrailPlugin(
     # ── Generation hooks ────────────────────────────────────────────
 
     @hook(HookType.GENERATION_PRE_CALL, mode=PluginMode.FIRE_AND_FORGET)
-    async def check_input(self, payload: Any, ctx: Any) -> None:
+    async def log_pre_call(self, payload: Any, ctx: Any) -> None:
         """Log the prompt being sent to the LLM."""
         action_preview = str(getattr(payload, "action", ""))[:200]
         self._write(
@@ -94,7 +91,7 @@ class AuditTrailPlugin(
         )
 
     @hook(HookType.GENERATION_POST_CALL, mode=PluginMode.FIRE_AND_FORGET)
-    async def check_output(self, payload: Any, ctx: Any) -> None:
+    async def log_post_call(self, payload: Any, ctx: Any) -> None:
         """Log LLM output and any Guardian verdicts."""
         mot = payload.model_output
         output_text = getattr(mot, "value", "") or "" if mot else ""
@@ -187,7 +184,7 @@ class AuditTrailPlugin(
     # ── Tool hooks (Pattern 3: LLM-directed tool calls) ──────────
 
     @hook(HookType.TOOL_PRE_INVOKE, mode=PluginMode.FIRE_AND_FORGET)
-    async def check_tool_input(self, payload: Any, ctx: Any) -> None:
+    async def log_tool_pre(self, payload: Any, ctx: Any) -> None:
         """Log tool call before execution."""
         tool_call = payload.model_tool_call
         self._write(
@@ -201,7 +198,7 @@ class AuditTrailPlugin(
         )
 
     @hook(HookType.TOOL_POST_INVOKE, mode=PluginMode.FIRE_AND_FORGET)
-    async def check_tool_output(self, payload: Any, ctx: Any) -> None:
+    async def log_tool_post(self, payload: Any, ctx: Any) -> None:
         """Log tool result after execution."""
         tool_call = payload.model_tool_call
         tool_name = getattr(tool_call, "name", "unknown")

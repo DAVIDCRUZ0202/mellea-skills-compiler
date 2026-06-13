@@ -54,17 +54,14 @@ def generate_policy_manifest(
 
     nexus_risks = []
     nexus_additional_risks = []
-    all_governance_risk_names = []
 
     for risk in identified_risks:
         description = guardian_prompt = getattr(risk, "description", "").strip()
-        all_governance_risk_names.append(risk.name)
 
         # sort the risks, granite guardian and other
         if risk.isDefinedByTaxonomy == GovernanceTaxonomy.IBM_GRANITE_GUARDIAN:
             guardian_prompt = risk.tag if risk.tag else guardian_prompt
             is_native = True if risk.tag else False
-            tier = "native" if is_native else "custom"
 
             nexus_risks.append(
                 NexusRisk(
@@ -75,7 +72,9 @@ def generate_policy_manifest(
                     taxonomy=risk.isDefinedByTaxonomy,
                 )
             )
-            LOGGER.info(f"  [Guardian] {risk.name} ({tier}) → {guardian_prompt[:60]}")
+            LOGGER.info(
+                f"  [Guardian] {risk.name} ({"native" if is_native else "custom"}) → {guardian_prompt[:60]}"
+            )
         else:
             nexus_additional_risks.append(
                 NexusRisk(
@@ -90,9 +89,9 @@ def generate_policy_manifest(
 
     # -- 2. Use the actions which are directly linked the risks
     identified_risks_governance_actions = risk_lists.get("mixed_control_items", [])
-    all_governance_actions: list[GovernanceAction] = []
+    governance_actions: list[GovernanceAction] = []
     for governance_item in identified_risks_governance_actions:
-        all_governance_actions.append(
+        governance_actions.append(
             GovernanceAction(
                 id=governance_item.id,
                 name=governance_item.name or governance_item.id,
@@ -109,10 +108,9 @@ def generate_policy_manifest(
         taxonomy=governance_taxonomies,
         risks=nexus_risks,
         additional_risks=nexus_additional_risks,
-        governance_actions=all_governance_actions,
+        governance_actions=governance_actions,
         governance_taxonomies=governance_taxonomies,
-        governance_risk_names=all_governance_risk_names,
-        model_used=risk_inference_engine.model_name_or_path,
+        model=risk_inference_engine.model_name_or_path,
     )
 
 
@@ -131,7 +129,7 @@ def generate_policy_markdown(manifest: PolicyManifest) -> str:
         f"# Policy: {manifest.use_case}",
         "",
         f"**Generated**: {manifest.generated_at}  ",
-        f"**Risk identification model**: {manifest.model_used}  ",
+        f"**Risk identification model**: {manifest.model}  ",
         f"**Taxonomies**: {', '.join(all_taxonomies)}",
     ]
     lines.extend(["", "---", ""])

@@ -103,7 +103,6 @@ class TestPolicyManifest:
             additional_risks=[],
             governance_actions=actions,
             governance_taxonomies=["nist-ai-rmf"],
-            governance_risk_names=["Risk1"],
         )
 
         assert manifest.use_case == "Test use case"
@@ -270,9 +269,8 @@ class TestPolicyManifest:
                 }
             ],
             "governance_taxonomies": ["nist-ai-rmf"],
-            "governance_risk_names": ["Risk1"],
             "generated_at": datetime.now(UTC).isoformat(),
-            "model_used": "test-model",
+            "model": "test-model",
         }
 
         with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:

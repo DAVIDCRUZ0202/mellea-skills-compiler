@@ -1,7 +1,6 @@
 """Runtime governance hooks for Mellea pipelines."""
 
 from abc import ABC, abstractmethod
-from pathlib import Path
 
 from mellea import plugins as mellea_plugins
 
@@ -12,30 +11,13 @@ LOGGER = configure_logger()
 
 
 class BasePlugin(ABC):
-    def __init__(self, output_dir: Path):
-        self.output_dir = output_dir
-
-    @abstractmethod
-    def check_input():
-        raise NotImplementedError
-
-    @abstractmethod
-    def check_output():
-        raise NotImplementedError
-
-    @abstractmethod
-    def check_tool_input():
-        raise NotImplementedError
-
-    @abstractmethod
-    def check_tool_output():
-        raise NotImplementedError
 
     @abstractmethod
     def summary() -> dict:
         raise NotImplementedError
 
     def register(self):
+        """Add plugin to the global registry."""
         mellea_plugins.register(self)
 
     def deregister(self) -> None:

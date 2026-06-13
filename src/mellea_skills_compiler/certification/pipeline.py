@@ -333,7 +333,7 @@ def full_pipeline(
     LOGGER.info("Guardian Verdict Summary")
     LOGGER.info("=" * 70)
 
-    LOGGER.info("  Total verdicts: %d", guardian_summary["total_verdicts"])
+    LOGGER.info("  Total verdicts: %d", len(guardian_summary["all_verdicts"]))
     LOGGER.info("  Passed (No risk): %d", len(guardian_summary["passed_verdicts"]))
     LOGGER.info(
         "  Flagged (Risk detected): %d", len(guardian_summary["flagged_verdicts"])
@@ -404,7 +404,7 @@ def full_pipeline(
     LOGGER.info("  Guardian risks: %d (from Nexus)", len(manifest.risks))
     LOGGER.info(
         "  Guardian verdicts: %d total, %d flagged",
-        guardian_summary["total_verdicts"],
+        len(guardian_summary["all_verdicts"]),
         len(guardian_summary["flagged_verdicts"]),
     )
     LOGGER.info("  Audit events: %d", len(audit_entries))
