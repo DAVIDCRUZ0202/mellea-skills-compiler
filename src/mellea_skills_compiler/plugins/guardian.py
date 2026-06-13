@@ -369,25 +369,25 @@ class GuardianAuditPlugin(
         )
 
         if not (not tool_output or not payload.success):
+            risk_label = (f"tool:{risk_label}",)
+
             # Run Guardian checks on the tool output (treat as assistant text)
-            verdicts: list[GuardianVerdict] = []
-            for risk_prompt, risk_label in zip(self.risk_prompts, self.risk_labels):
-                verdict = _call_guardian(
-                    user_text=f"Tool {tool_name} was called",
-                    risk_label=f"tool:{risk_label}",
-                    risk_prompt=risk_prompt,
-                    assistant_text=tool_output[:2000],
-                    guardian_model=self.guardian_model,
-                    inference_engine=self.inference_engine,
-                )
-                verdicts.append(verdict)
+            verdicts: list[GuardianVerdict] = _call_guardian(
+                self.risks,
+                user_text=f"Tool {tool_name} was called",
+                assistant_text=tool_output[:2000],
+                guardian_model=self.guardian_model,
+                inference_engine=self.inference_engine,
+            )
+
+            for verdict in verdicts:
+                verdict.risk = f"tool:{verdict.risk}"
                 if verdict.label == "Yes":
                     LOGGER.warning(
                         "[guardian-post-tool] RISK in %s output: %s",
                         tool_name,
-                        risk_label,
+                        verdict.risk,
                     )
-
             self.all_verdicts.extend(verdicts)
 
 
@@ -469,17 +469,13 @@ class GuardianEnforcePlugin(
             return None
 
         # Run Guardian checks on tool output
-        verdicts: list[GuardianVerdict] = []
-        for risk_prompt, risk_label in zip(self.risk_prompts, self.risk_labels):
-            verdict = _call_guardian(
-                user_text=f"Tool {tool_name} was called",
-                risk_label=f"tool:{risk_label}",
-                risk_prompt=risk_prompt,
-                assistant_text=tool_output[:2000],
-                guardian_model=self.guardian_model,
-                inference_engine=self.inference_engine,
-            )
-            verdicts.append(verdict)
+        verdicts: list[GuardianVerdict] = _call_guardian(
+            self.risks,
+            user_text=f"Tool {tool_name} was called",
+            assistant_text=tool_output[:2000],
+            guardian_model=self.guardian_model,
+            inference_engine=self.inference_engine,
+        )
 
         flagged = [v.risk for v in verdicts if v.label == "Yes"]
         if flagged:
