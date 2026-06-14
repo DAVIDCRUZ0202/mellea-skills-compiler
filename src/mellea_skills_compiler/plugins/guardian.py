@@ -477,9 +477,7 @@ class GuardianEnforcePlugin(
         if flagged:
             risk_list = ", ".join(flagged)
             console.print(
-                f"[yellow]Plugin-\\[guardian-post-tool-enforce][/]\n  BLOCKING TOOL OUTPUT — risks in %s output: %s",
-                tool_name,
-                risk_list,
+                f"[yellow]Plugin-\\[guardian-post-tool-enforce][/]\n  BLOCKING TOOL OUTPUT — risks in {tool_name} output: {risk_list}"
             )
             console.print()
             return block(
