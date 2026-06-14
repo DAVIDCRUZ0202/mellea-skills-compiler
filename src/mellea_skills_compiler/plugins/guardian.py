@@ -404,6 +404,8 @@ class GuardianEnforcePlugin(
         verdicts: List[GuardianVerdict] = _run_guardian_pre_checks(
             payload, self.risks, self.guardian_model, self.inference_engine
         )
+        self.all_verdicts.extend(verdicts)
+
         flagged = [v.risk for v in verdicts if v.label == "Yes"]
         if flagged:
             risk_list = ", ".join(flagged)
@@ -425,6 +427,8 @@ class GuardianEnforcePlugin(
         verdicts = _run_guardian_post_checks(
             payload, self.risks, self.guardian_model, self.inference_engine
         )
+        self.all_verdicts.extend(verdicts)
+
         flagged = [v.risk for v in verdicts if v.label == "Yes"]
         if flagged:
             risk_list = ", ".join(flagged)
@@ -446,7 +450,7 @@ class GuardianEnforcePlugin(
         tool_call = payload.model_tool_call
         tool_name = getattr(tool_call, "name", "unknown")
         args = getattr(tool_call, "args", {})
-        LOGGER.info("[guardian-enforce-pre-tool] %s(%s)", tool_name, str(args)[:100])
+        LOGGER.info("[guardian-enforce-tool-pre] %s(%s)", tool_name, str(args)[:100])
         return None
 
     @hook(HookType.TOOL_POST_INVOKE, mode=PluginMode.SEQUENTIAL)
@@ -467,15 +471,17 @@ class GuardianEnforcePlugin(
             guardian_model=self.guardian_model,
             inference_engine=self.inference_engine,
         )
+        self.all_verdicts.extend(verdicts)
 
         flagged = [v.risk for v in verdicts if v.label == "Yes"]
         if flagged:
             risk_list = ", ".join(flagged)
-            LOGGER.warning(
-                "[guardian-enforce-post-tool] BLOCKING — risks in %s output: %s",
+            console.print(
+                f"[yellow]Plugin-\\[guardian-post-tool-enforce][/]\n  BLOCKING TOOL OUTPUT — risks in %s output: %s",
                 tool_name,
                 risk_list,
             )
+            console.print()
             return block(
                 reason=f"Guardian detected risks in tool output ({tool_name}): {risk_list}",
                 code="guardian_tool_risk_detected",

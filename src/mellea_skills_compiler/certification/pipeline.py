@@ -67,8 +67,9 @@ def _run_single_fixture(pipeline_fn: Callable, fixture: Dict):
             report = pipeline_fn(context)
         LOGGER.info("Pipeline executed successfully.")
     except PluginViolationError as e:
+        LOGGER.warning("Pipeline BLOCKED by Guardian enforcement.")
         LOGGER.warning(
-            f"Pipeline BLOCKED by Guardian enforcement. The decomposed pipeline was halted because a generation triggered a Guardian risk detection in ENFORCE mode. {e.reason}"
+            f"The decomposed pipeline was halted because a generation triggered a Guardian risk detection in ENFORCE mode. {e.reason}"
         )
 
     return report
@@ -313,36 +314,35 @@ def full_pipeline(
         audit_plugin.deregister()
 
     # ── Step 5: Guardian verdict summary ──────────────────────────────
-    guardian_summary = guardian_plugin.summary()
     LOGGER.info("")
     LOGGER.info("=" * 70)
     LOGGER.info("Guardian Verdict Summary")
     LOGGER.info("=" * 70)
 
-    LOGGER.info("  Total verdicts: %d", len(guardian_summary["all_verdicts"]))
-    LOGGER.info("  Passed (No risk): %d", len(guardian_summary["passed_verdicts"]))
+    verdict_summary = guardian_plugin.summary()
+    LOGGER.info("  Total verdicts: %d", len(verdict_summary["all_verdicts"]))
+    LOGGER.info("  Passed (No risk): %d", len(verdict_summary["passed_verdicts"]))
     LOGGER.info(
-        "  Flagged (Risk detected): %d", len(guardian_summary["flagged_verdicts"])
+        "  Flagged (Risk detected): %d", len(verdict_summary["flagged_verdicts"])
     )
     LOGGER.info(
-        "  Failed (Guardian error): %d", len(guardian_summary["failed_verdicts"])
+        "  Failed (Guardian error): %d", len(verdict_summary["failed_verdicts"])
     )
-    if guardian_summary["flagged_verdicts"]:
+    if verdict_summary["flagged_verdicts"]:
         LOGGER.info("  Flagged risks:")
-        for v in guardian_summary["flagged_verdicts"]:
+        for v in verdict_summary["flagged_verdicts"]:
             LOGGER.info(
-                "    [!!] risk=%-25s raw=%.50s",
-                v.risk,
-                v.raw_output.replace("\n", " "),
+                f"  [!!] risk={v.risk} raw={v.raw_output.replace("\n", " ")[0:50]}"
             )
 
     # ── Step 6: Audit trail summary ───────────────────────────────────
     LOGGER.info("")
-    summary = audit_plugin.summary()
     LOGGER.info("=" * 70)
     LOGGER.info("Audit Trail Summary")
     LOGGER.info("=" * 70)
-    for k, v in summary.items():
+
+    audit_summary = audit_plugin.summary()
+    for k, v in audit_summary.items():
         LOGGER.info("  %s: %s", k, v)
 
     # ── Step 7: Compliance classification ─────────────────────────────
@@ -350,6 +350,7 @@ def full_pipeline(
     LOGGER.info("=" * 70)
     LOGGER.info("Compliance Classification")
     LOGGER.info("=" * 70)
+
     compliance = classify_governance_requirements(manifest, nexus)
     counts = compliance.counts
     total = sum(counts.values())
@@ -366,6 +367,7 @@ def full_pipeline(
     LOGGER.info("=" * 70)
     LOGGER.info("Certification Report")
     LOGGER.info("=" * 70)
+
     audit_entries = load_audit_trail(audit_plugin.log_path)
     cert_report = generate_certification_report(
         manifest,
@@ -390,8 +392,8 @@ def full_pipeline(
     LOGGER.info("  Guardian risks: %d (from Nexus)", len(manifest.risks))
     LOGGER.info(
         "  Guardian verdicts: %d total, %d flagged",
-        len(guardian_summary["all_verdicts"]),
-        len(guardian_summary["flagged_verdicts"]),
+        len(verdict_summary["all_verdicts"]),
+        len(verdict_summary["flagged_verdicts"]),
     )
     LOGGER.info("  Audit events: %d", len(audit_entries))
     LOGGER.info(
