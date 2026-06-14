@@ -67,6 +67,7 @@ class AuditTrailPlugin(
         LOGGER.info(f"Audit plugin registered - Trail path: {log_path}")
 
     def _write(self, entry: dict) -> None:
+        entry["guardian_mode"] = self.guardian_plugin._PLUGIN_MODE
         entry["timestamp"] = datetime.now(UTC).isoformat()
         if self.policy_id:
             entry["policy_id"] = self.policy_id

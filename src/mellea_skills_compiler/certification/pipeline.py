@@ -13,7 +13,7 @@ End-to-end demonstration:
 """
 
 import json
-import sys
+from datetime import datetime
 from pathlib import Path
 from typing import Callable, Dict, Optional
 
@@ -34,11 +34,11 @@ from mellea_skills_compiler.certification.report import (
     load_audit_trail,
 )
 from mellea_skills_compiler.enums import (
+    GaurdianMode,
     InferenceEngineType,
-    PipelineMode,
     SpecFileFormat,
 )
-from mellea_skills_compiler.models import PolicyManifest
+from mellea_skills_compiler.models import PolicyManifest, RunResult
 from mellea_skills_compiler.plugins.audit import AuditTrailPlugin
 from mellea_skills_compiler.plugins.guardian import (
     GuardianPlugin,
@@ -88,14 +88,17 @@ def _get_fixture(fixture_id, fixtures):
         raise ValueError(f"Unknown fixture '{fixture_id}'. Available: {available}")
 
 
-def skill_pipeline(
+def run_pipeline(
     pipeline_dir: Path,
     fixture_id: str,
     enforce: bool = False,
     no_guardian: bool = False,
-):
+) -> RunResult:
     guardian_plugin = None
     audit_plugin = None
+
+    # Get guardian mode - AUDIT or ENFORCE
+    guardian_mode = GaurdianMode("enforce" if enforce else "audit")
 
     if no_guardian:
         LOGGER.info("Guardian checks disabled (--no-guardian)")
@@ -113,22 +116,23 @@ def skill_pipeline(
                 if not manifest_path.exists():
                     raise Exception("Unable to locate policy manifest [manifest_path].")
                 else:
-                    # Get pipeline mode - AUDIT or ENFORCE
-                    pipeline_mode = PipelineMode(enforce)
-
                     # Load existing policy manifest
                     manifest = load_policy_manifest(manifest_path)
 
                     # Configure plugins from manifest
                     LOGGER.info(
-                        f"Configuring Guardian hooks from Policy Manifest [{pipeline_mode} mode]...",
+                        f"Configuring Guardian hooks from Policy Manifest [{guardian_mode} mode]...",
                     )
                     guardian_plugin: GuardianPlugin = GuardianPluginFactory.create(
-                        pipeline_mode, manifest
+                        guardian_mode, manifest
                     )
                     guardian_plugin.register()
+                    audit_trail_path = (
+                        audit_dir
+                        / f"audit_trail_{datetime.now().strftime("%d-%m-%Y_%H:%M:%S")}.jsonl"
+                    )
                     audit_plugin = AuditTrailPlugin(
-                        log_path=audit_dir / "audit_trail.jsonl",
+                        log_path=audit_trail_path,
                         guardian_plugin=guardian_plugin,
                     )
                     audit_plugin.register()
@@ -158,6 +162,16 @@ def skill_pipeline(
         console.print("\n[bold blue]OUTPUT:[/]")
         print(output)
 
+        # Return RunResult with the summary of the run
+        return RunResult(
+            guardian_mode=guardian_mode,
+            guardian_verdict=guardian_plugin.summary() if guardian_plugin else None,
+            fixture_summary={"name": fixture, "output": output},
+            audit_summary=audit_plugin.summary() if audit_plugin else None,
+            guardian_audit_dir=audit_dir if guardian_plugin else None,
+            guardian_audit_trail_path=audit_trail_path if guardian_plugin else None,
+        )
+
     except Exception as e:
         LOGGER.error(f"Pipeline run failed: {str(e)}")
     finally:
@@ -173,7 +187,7 @@ def full_pipeline(
     model: Optional[str] = None,
     guardian_model: Optional[str] = None,
     inference_engine: InferenceEngineType = InferenceEngineType.OLLAMA,
-):
+) -> RunResult:
     """Full Certification Pipeline for Mellea skill
 
     Args:
@@ -204,12 +218,12 @@ def full_pipeline(
     # Get the desired fixture
     fixture = _get_fixture(fixture_id, fixtures)
 
-    # Get pipeline mode - AUDIT or ENFORCE
-    pipeline_mode = PipelineMode(enforce)
+    # Get guardian mode - AUDIT or ENFORCE
+    guardian_mode = GaurdianMode("enforce" if enforce else "audit")
 
     print()
     LOGGER.info("=" * 70)
-    LOGGER.info(f"MelleaSkills — Full Pipeline [{pipeline_mode} mode]")
+    LOGGER.info(f"MelleaSkills — Full Pipeline [{guardian_mode} mode]")
     LOGGER.info("=" * 70)
 
     # Certification artifacts go into the skill's audit/ directory
@@ -278,14 +292,17 @@ def full_pipeline(
     # ── Step 3: Configure plugins from manifest ───────────────────────
     print()
     LOGGER.info(
-        f"Configuring Guardian hooks from Policy Manifest [{pipeline_mode} mode]...",
+        f"Configuring Guardian hooks from Policy Manifest [{guardian_mode} mode]...",
     )
     guardian_plugin: GuardianPlugin = GuardianPluginFactory.create(
-        pipeline_mode, manifest, guardian_model, inference_engine
+        guardian_mode, manifest, guardian_model, inference_engine
     )
     guardian_plugin.register()
+    audit_trail_path = (
+        output_dir / f"audit_trail_{datetime.now().strftime("%d-%m-%Y_%H:%M:%S")}.jsonl"
+    )
     audit_plugin = AuditTrailPlugin(
-        log_path=output_dir / "audit_trail.jsonl", guardian_plugin=guardian_plugin
+        log_path=audit_trail_path, guardian_plugin=guardian_plugin
     )
     audit_plugin.register()
 
@@ -293,9 +310,10 @@ def full_pipeline(
     print()
     LOGGER.info("Running decomposed pipeline from %s...", pipeline_dir.name)
     LOGGER.info(f"  - Fixture: {fixture["id"]}")
-    LOGGER.info(f"  - Guardian checks [{pipeline_mode}] every generation (pre + post).")
+    LOGGER.info(f"  - Guardian checks [{guardian_mode}] every generation (pre + post).")
     LOGGER.info("  - Audit Trail checks every end points (pre + post).")
 
+    report_json_path = None
     try:
         # run the given fixture
         report = _run_single_fixture(pipeline_fn, fixture)
@@ -385,7 +403,7 @@ def full_pipeline(
     any_risk = any(v.label == "Yes" for v in guardian_plugin.all_verdicts)
     LOGGER.info("=" * 70)
     skill_name = frontmatter.get("name", "unknown")
-    LOGGER.info(f"COMPLETE — {skill_name} [{pipeline_mode} mode]")
+    LOGGER.info(f"COMPLETE — {skill_name} [{guardian_mode} mode]")
     LOGGER.info("=" * 70)
     LOGGER.info("")
     LOGGER.info("  Skill: %s (%s)", skill_name, sensitivity["tier_display"])
@@ -416,3 +434,13 @@ def full_pipeline(
         LOGGER.warning("  STATUS: RISKS DETECTED — review audit trail")
     else:
         LOGGER.info("  STATUS: ALL CHECKS PASSED")
+
+    # Return RunResult with the summary of the run
+    return RunResult(
+        guardian_mode=guardian_mode,
+        guardian_verdict=verdict_summary,
+        fixture_summary={"name": fixture, "output": report_json_path},
+        audit_summary=audit_summary,
+        guardian_audit_dir=output_dir,
+        guardian_audit_trail_path=audit_trail_path,
+    )

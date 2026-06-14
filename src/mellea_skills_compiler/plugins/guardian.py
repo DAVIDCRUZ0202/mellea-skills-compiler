@@ -37,9 +37,9 @@ from mellea.plugins.registry import block
 from rich.console import Console
 
 from mellea_skills_compiler.enums import (
+    GaurdianMode,
     GovernanceTaxonomy,
     InferenceEngineType,
-    PipelineMode,
 )
 from mellea_skills_compiler.inference import InferenceService
 from mellea_skills_compiler.models import GuardianVerdict, NexusRisk, PolicyManifest
@@ -207,10 +207,10 @@ def _run_guardian_pre_checks(
 
 class GuardianPluginFactory:
 
-    def create(pipeline_mode: PipelineMode, *args, **kwargs):
+    def create(guardian_mode: GaurdianMode, *args, **kwargs):
         guardian_plugin_class = (
             GuardianEnforcePlugin
-            if pipeline_mode == PipelineMode.ENFORCE
+            if guardian_mode == GaurdianMode.ENFORCE
             else GuardianAuditPlugin
         )
         return guardian_plugin_class(*args, **kwargs)
@@ -293,7 +293,7 @@ class GuardianAuditPlugin(
     which returns a ``GuardianEnforcePlugin`` instead.
     """
 
-    _PLUGIN_MODE = PipelineMode.AUDIT
+    _PLUGIN_MODE = GaurdianMode.AUDIT
 
     def __init__(
         self,
@@ -386,7 +386,7 @@ class GuardianEnforcePlugin(
     with a PluginViolationError.
     """
 
-    _PLUGIN_MODE = PipelineMode.ENFORCE
+    _PLUGIN_MODE = GaurdianMode.ENFORCE
 
     def __init__(
         self,

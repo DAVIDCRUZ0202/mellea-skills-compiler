@@ -24,11 +24,29 @@ def temp_audit_file():
 
 @pytest.fixture
 def guardian_plugin():
-    """Create an AuditTrailPlugin instance."""
+    """Create a GuardianAuditPlugin instance."""
+    from mellea_skills_compiler.enums import GovernanceTaxonomy
+    from mellea_skills_compiler.models import NexusRisk
+
     return GuardianAuditPlugin(
         manifest=PolicyManifest(
             taxonomy="granite-guardian",
-            risks=[],
+            risks=[
+                NexusRisk(
+                    name="jailbreak",
+                    description="Jailbreak attempts",
+                    guardian_prompt="jailbreak",
+                    is_native=True,
+                    taxonomy=GovernanceTaxonomy.IBM_GRANITE_GUARDIAN,
+                ),
+                NexusRisk(
+                    name="harm",
+                    description="Harmful content",
+                    guardian_prompt="harm",
+                    is_native=True,
+                    taxonomy=GovernanceTaxonomy.IBM_GRANITE_GUARDIAN,
+                ),
+            ],
             additional_risks=None,
             use_case="test_use_case",
         )
@@ -118,9 +136,15 @@ class TestAuditTrailHooks:
         """Test generation_pre_call hook."""
         import asyncio
 
+        # Mock action with format_for_llm method
+        action = MagicMock()
+        llm_format = MagicMock()
+        llm_format.args = {"arg1": "value1", "arg2": "value2"}
+        action.format_for_llm.return_value = llm_format
+
         payload = MagicMock()
         payload.prompt = "Test prompt"
-        payload.action = "Test action"
+        payload.action = action
         payload.session_id = "session-1"
         payload.request_id = "req-1"
         payload.model_options = {"temperature": 0.7}
@@ -134,20 +158,23 @@ class TestAuditTrailHooks:
         assert entry["hook"] == "generation_pre_call"
         assert entry["session_id"] == "session-1"
         assert entry["request_id"] == "req-1"
+        assert "input_preview" in entry
 
     def test_log_post_call_without_risk(self, audit_plugin):
         """Test generation_post_call hook without risk detection."""
+        from mellea_skills_compiler.models import GuardianVerdict
+
+        # Add verdicts to guardian plugin
+        audit_plugin.guardian_plugin.all_verdicts = [
+            GuardianVerdict(risk="jailbreak", label="No", raw_output="<score>no</score>"),
+            GuardianVerdict(risk="harm", label="No", raw_output="<score>no</score>"),
+        ]
+
         payload = MagicMock()
         payload.model_output = MagicMock(value="Test output")
         payload.latency_ms = 150
         payload.session_id = "session-1"
         payload.request_id = "req-1"
-        payload.user_metadata = {
-            "guardian_verdicts": [
-                {"risk": "jailbreak", "label": "No"},
-                {"risk": "harm", "label": "No"},
-            ]
-        }
 
         ctx = MagicMock()
 
@@ -162,17 +189,19 @@ class TestAuditTrailHooks:
 
     def test_log_post_call_with_risk(self, audit_plugin):
         """Test generation_post_call hook with risk detection."""
+        from mellea_skills_compiler.models import GuardianVerdict
+
+        # Add verdicts to guardian plugin with one risk detected
+        audit_plugin.guardian_plugin.all_verdicts = [
+            GuardianVerdict(risk="jailbreak", label="Yes", raw_output="<score>yes</score>"),
+            GuardianVerdict(risk="harm", label="No", raw_output="<score>no</score>"),
+        ]
+
         payload = MagicMock()
         payload.model_output = MagicMock(value="Test output")
         payload.latency_ms = 200
         payload.session_id = "session-1"
         payload.request_id = "req-1"
-        payload.user_metadata = {
-            "guardian_verdicts": [
-                {"risk": "jailbreak", "label": "Yes"},
-                {"risk": "harm", "label": "No"},
-            ]
-        }
 
         ctx = MagicMock()
 
@@ -304,15 +333,20 @@ class TestAuditTrailSummary:
 
     def test_summary_with_entries(self, audit_plugin):
         """Test summary with multiple entries."""
+        from mellea_skills_compiler.models import GuardianVerdict
+
+        # Add verdicts to guardian plugin
+        audit_plugin.guardian_plugin.all_verdicts = [
+            GuardianVerdict(risk="test", label="No", raw_output="<score>no</score>"),
+            GuardianVerdict(risk="test2", label="No", raw_output="<score>no</score>"),
+        ]
+
         # Add generation entries
         gen_payload = MagicMock()
         gen_payload.model_output = MagicMock(value="Output")
         gen_payload.latency_ms = 100
         gen_payload.session_id = "s1"
         gen_payload.request_id = "r1"
-        gen_payload.user_metadata = {
-            "guardian_verdicts": [{"risk": "test", "label": "No"}]
-        }
 
         asyncio.run(audit_plugin.log_post_call(gen_payload, MagicMock()))
 
@@ -339,15 +373,19 @@ class TestAuditTrailSummary:
 
     def test_summary_with_risks(self, audit_plugin):
         """Test summary counts risk detections."""
+        from mellea_skills_compiler.models import GuardianVerdict
+
+        # Add verdict with risk detected to guardian plugin
+        audit_plugin.guardian_plugin.all_verdicts = [
+            GuardianVerdict(risk="test", label="Yes", raw_output="<score>yes</score>"),
+        ]
+
         # Add generation with risk
         payload = MagicMock()
         payload.model_output = MagicMock(value="Output")
         payload.latency_ms = 100
         payload.session_id = "s1"
         payload.request_id = "r1"
-        payload.user_metadata = {
-            "guardian_verdicts": [{"risk": "test", "label": "Yes"}]
-        }
 
         asyncio.run(audit_plugin.log_post_call(payload, MagicMock()))
 

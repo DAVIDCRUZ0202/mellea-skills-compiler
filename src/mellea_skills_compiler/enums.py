@@ -56,9 +56,10 @@ class CoverageLevel(Enum):
     MANUAL = "MANUAL"
 
 
-class PipelineMode(Enum):
-    ENFORCE = True
-    AUDIT = False
+class GaurdianMode(Enum):
+    DISABLED = "disabled"
+    ENFORCE = "enforce"
+    AUDIT = "audit"
 
     def __str__(self):
         return self.name
