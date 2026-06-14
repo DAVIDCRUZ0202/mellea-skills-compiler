@@ -103,39 +103,41 @@ def run_pipeline(
     if no_guardian:
         LOGGER.info("Guardian checks disabled (--no-guardian)")
     else:
-        # Set audit directory
-        audit_dir = pipeline_dir.parent / "audit"
+        # Get audit directory with the manifest file
+        manifest_path = None
+        audit_dirs = list(pipeline_dir.parent.glob("audit_*"))
+        for audit_dir in reversed(audit_dirs):
+            if (audit_dir / "policy_manifest.json").exists():
+                manifest_path = audit_dir / "policy_manifest.json"
+                break
 
         try:
-            if not audit_dir.is_dir():
+            if not manifest_path:
                 raise Exception(
-                    f"The audit directory is not available in {pipeline_dir.parent}."
+                    f"Unable to find audit directory with a manifest file in {pipeline_dir.parent}."
                 )
             else:
-                manifest_path = audit_dir / "policy_manifest.json"
-                if not manifest_path.exists():
-                    raise Exception("Unable to locate policy manifest [manifest_path].")
-                else:
-                    # Load existing policy manifest
-                    manifest = load_policy_manifest(manifest_path)
+                # Load existing policy manifest
+                manifest = load_policy_manifest(manifest_path)
 
-                    # Configure plugins from manifest
-                    LOGGER.info(
-                        f"Configuring Guardian hooks from Policy Manifest [{guardian_mode} mode]...",
-                    )
-                    guardian_plugin: GuardianPlugin = GuardianPluginFactory.create(
-                        guardian_mode, manifest
-                    )
-                    guardian_plugin.register()
-                    audit_trail_path = (
-                        audit_dir
-                        / f"audit_trail_{datetime.now().strftime("%d-%m-%Y_%H:%M:%S")}.jsonl"
-                    )
-                    audit_plugin = AuditTrailPlugin(
-                        log_path=audit_trail_path,
-                        guardian_plugin=guardian_plugin,
-                    )
-                    audit_plugin.register()
+                # Configure plugins from manifest
+                LOGGER.info(
+                    f"Configuring Guardian hooks from Policy Manifest [{guardian_mode} mode]...",
+                )
+                guardian_plugin: GuardianPlugin = GuardianPluginFactory.create(
+                    guardian_mode, manifest
+                )
+                guardian_plugin.register()
+                output_dir = (
+                    pipeline_dir.parent
+                    / f"audit_{datetime.now().strftime("%d-%m-%Y_%H:%M:%S")}"
+                )
+                output_dir.mkdir(exist_ok=True)
+                audit_plugin = AuditTrailPlugin(
+                    log_path=output_dir / "audit_trail.jsonl",
+                    guardian_plugin=guardian_plugin,
+                )
+                audit_plugin.register()
         except Exception as e:
             console.print(
                 f"[yellow]Warning:[/] {str(e)}"
@@ -169,7 +171,6 @@ def run_pipeline(
             fixture_summary={"name": fixture, "output": output},
             audit_summary=audit_plugin.summary() if audit_plugin else None,
             guardian_audit_dir=audit_dir if guardian_plugin else None,
-            guardian_audit_trail_path=audit_trail_path if guardian_plugin else None,
         )
 
     except Exception as e:
@@ -227,7 +228,9 @@ def full_pipeline(
     LOGGER.info("=" * 70)
 
     # Certification artifacts go into the skill's audit/ directory
-    output_dir = pipeline_dir.parent / "audit"
+    output_dir = (
+        pipeline_dir.parent / f"audit_{datetime.now().strftime("%d-%m-%Y_%H:%M:%S")}"
+    )
     output_dir.mkdir(exist_ok=True)
 
     # load and create ai atlas nexus instance
@@ -298,11 +301,8 @@ def full_pipeline(
         guardian_mode, manifest, guardian_model, inference_engine
     )
     guardian_plugin.register()
-    audit_trail_path = (
-        output_dir / f"audit_trail_{datetime.now().strftime("%d-%m-%Y_%H:%M:%S")}.jsonl"
-    )
     audit_plugin = AuditTrailPlugin(
-        log_path=audit_trail_path, guardian_plugin=guardian_plugin
+        log_path=output_dir / "audit_trail.jsonl", guardian_plugin=guardian_plugin
     )
     audit_plugin.register()
 
@@ -442,5 +442,4 @@ def full_pipeline(
         fixture_summary={"name": fixture, "output": report_json_path},
         audit_summary=audit_summary,
         guardian_audit_dir=output_dir,
-        guardian_audit_trail_path=audit_trail_path,
     )

@@ -154,4 +154,3 @@ class RunResult:
     fixture_summary: Dict[str, Any]
     audit_summary: Dict[str, Any]
     guardian_audit_dir: str
-    guardian_audit_trail_path: str
