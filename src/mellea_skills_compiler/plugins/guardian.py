@@ -29,6 +29,7 @@ Usage (Nexus-driven — risks from policy manifest):
 from __future__ import annotations
 
 import urllib.error
+from copy import deepcopy
 from typing import Any, List, Optional
 
 from mellea.plugins import HookType, Plugin, PluginMode, hook
@@ -160,16 +161,8 @@ def _run_guardian_post_checks(
     )
     for verdict in verdicts:
         console.print(
-            f"[blue]Plugin-\\[guardian-post][/]\n  [white]risk={verdict.risk}\n  label={verdict.label}\n  output_preview={assistant_text.replace("\n", " ")[0:60]}[/]"
+            f"[blue]Plugin-\\[guardian-post][/]\n  [white]risk={verdict.risk}\n  label={verdict.label}\n  output_preview={assistant_text.replace("\n", " ")[0:90]}[/]"
         )
-
-    # Stash verdicts in user_metadata for audit_trail_hook to pick up
-    meta = dict(payload.user_metadata)
-    meta["guardian_verdicts"] = [
-        {"risk": v.risk, "label": v.label, "raw": v.raw_output, "ts": v.timestamp}
-        for v in verdicts
-    ]
-
     return verdicts
 
 
@@ -207,7 +200,7 @@ def _run_guardian_pre_checks(
     )
     for verdict in verdicts:
         console.print(
-            f"[blue]Plugin-\\[guardian-pre][/]\n  [white]risk={verdict.risk}\n  label={verdict.label}\n  input_preview={user_text.replace("\n", " ")[0:60]}[/]"
+            f"[blue]Plugin-\\[guardian-pre][/]\n  [white]risk={verdict.risk}\n  label={verdict.label}\n  input_preview={user_text.replace("\n", " ")[0:90]}[/]"
         )
     return verdicts
 
@@ -356,26 +349,31 @@ class GuardianAuditPlugin(
         )
 
         if not (not tool_output or not payload.success):
-            risk_label = (f"tool:{risk_label}",)
+
+            tool_risks = []
+            for risk in self.risks:
+                tool_risk = deepcopy(risk)
+                tool_risk.name = f"tool:{tool_risk.name}"
+                tool_risks.append(tool_risk)
 
             # Run Guardian checks on the tool output (treat as assistant text)
             verdicts: list[GuardianVerdict] = _call_guardian(
-                self.risks,
+                tool_risks,
                 user_text=f"Tool {tool_name} was called",
                 assistant_text=tool_output[:2000],
                 guardian_model=self.guardian_model,
                 inference_engine=self.inference_engine,
             )
-
-            for verdict in verdicts:
-                verdict.risk = f"tool:{verdict.risk}"
-                if verdict.label == "Yes":
-                    LOGGER.warning(
-                        "[guardian-post-tool] RISK in %s output: %s",
-                        tool_name,
-                        verdict.risk,
-                    )
             self.all_verdicts.extend(verdicts)
+
+            flagged = [v.risk for v in verdicts if v.label == "Yes"]
+            if flagged:
+                risk_list = ", ".join(flagged)
+                console.print()
+                console.print(
+                    f"[yellow]Plugin-\\[guardian-post-tool][/]\n  RISK IN {tool_name} output: {risk_list}"
+                )
+                console.print()
 
 
 class GuardianEnforcePlugin(
@@ -409,7 +407,7 @@ class GuardianEnforcePlugin(
         flagged = [v.risk for v in verdicts if v.label == "Yes"]
         if flagged:
             risk_list = ", ".join(flagged)
-            print()
+            console.print()
             console.print(
                 f"[yellow]Plugin-\\[guardian-pre-enforce][/]\n  BLOCKING INPUT — risks flagged: {risk_list}"
             )
@@ -432,7 +430,7 @@ class GuardianEnforcePlugin(
         flagged = [v.risk for v in verdicts if v.label == "Yes"]
         if flagged:
             risk_list = ", ".join(flagged)
-            print()
+            console.print()
             console.print(
                 f"[yellow]Plugin-\\[guardian-post-enforce][/]\n  BLOCKING OUTPUT — risks flagged: {risk_list}"
             )
@@ -463,9 +461,15 @@ class GuardianEnforcePlugin(
         if not tool_output or not payload.success:
             return None
 
+        tool_risks = []
+        for risk in self.risks:
+            tool_risk = deepcopy(risk)
+            tool_risk.name = f"tool:{tool_risk.name}"
+            tool_risks.append(tool_risk)
+
         # Run Guardian checks on tool output
         verdicts: list[GuardianVerdict] = _call_guardian(
-            self.risks,
+            tool_risks,
             user_text=f"Tool {tool_name} was called",
             assistant_text=tool_output[:2000],
             guardian_model=self.guardian_model,
@@ -476,6 +480,7 @@ class GuardianEnforcePlugin(
         flagged = [v.risk for v in verdicts if v.label == "Yes"]
         if flagged:
             risk_list = ", ".join(flagged)
+            console.print()
             console.print(
                 f"[yellow]Plugin-\\[guardian-post-tool-enforce][/]\n  BLOCKING TOOL OUTPUT — risks in {tool_name} output: {risk_list}"
             )

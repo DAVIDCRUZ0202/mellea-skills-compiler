@@ -255,7 +255,7 @@ def full_pipeline(
     use_case = skill_to_use_case(parsed, sensitivity)
     LOGGER.info(f"  Description: {use_case}")
 
-    # ── Generate policy manifest using AI Atlas Nexus ────────────────────
+    # ── Step 1: Generate policy manifest using AI Atlas Nexus ────────────────────
     print()
     LOGGER.info("Identifying risks via AI Atlas Nexus...")
     nexus_data_path = get_data_path()
@@ -264,7 +264,7 @@ def full_pipeline(
     manifest_path = output_dir / "policy_manifest.json"
     manifest.to_json(manifest_path)
 
-    # ── Generate policy markdown ────────────────────
+    # ── Step 2: Generate policy markdown ────────────────────
     policy_md = generate_policy_markdown(manifest)
     policy_path = output_dir / "POLICY.md"
     policy_path.write_text(policy_md)

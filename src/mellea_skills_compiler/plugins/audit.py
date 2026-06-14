@@ -75,17 +75,19 @@ class AuditTrailPlugin(
             f.write(json.dumps(entry, default=str) + "\n")
 
     # ── Generation hooks ────────────────────────────────────────────
-
     @hook(HookType.GENERATION_PRE_CALL, mode=PluginMode.FIRE_AND_FORGET)
     async def log_pre_call(self, payload: Any, ctx: Any) -> None:
         """Log the prompt being sent to the LLM."""
-        action_preview = str(getattr(payload, "action", ""))[:200]
+        action = payload.action
+        if action is None:
+            return
+        input_preview = dict(action.format_for_llm().args)
         self._write(
             {
                 "hook": "generation_pre_call",
                 "session_id": getattr(payload, "session_id", ""),
                 "request_id": getattr(payload, "request_id", ""),
-                "action_preview": action_preview.replace("\n", " "),
+                "input_preview": input_preview,
                 "model_options": dict(getattr(payload, "model_options", {})),
             }
         )
@@ -93,49 +95,46 @@ class AuditTrailPlugin(
     @hook(HookType.GENERATION_POST_CALL, mode=PluginMode.FIRE_AND_FORGET)
     async def log_post_call(self, payload: Any, ctx: Any) -> None:
         """Log LLM output and any Guardian verdicts."""
-        mot = payload.model_output
-        output_text = getattr(mot, "value", "") or "" if mot else ""
+        model_output = payload.model_output
+        output_text = getattr(model_output, "value", "") or "" if model_output else ""
+        try:
+            output_text = json.loads(output_text)
+        except:
+            pass
         latency = getattr(payload, "latency_ms", 0)
 
-        # Try user_metadata first, then fall back to the Guardian plugin ref
-        verdicts = payload.user_metadata.get("guardian_verdicts", [])
-        if not verdicts and self.guardian_plugin is not None:
+        verdicts = []
+        if self.guardian_plugin is not None:
             # Read the most recent verdicts from the Guardian plugin directly
             recent = self.guardian_plugin.all_verdicts[
                 -len(self.guardian_plugin.risks) :
             ]
-            verdicts = [
-                {
-                    "risk": v.risk,
-                    "label": v.label,
-                    "raw": v.raw_output,
-                    "ts": v.timestamp,
-                }
-                for v in recent
-            ]
+            verdicts.extend(
+                [
+                    {
+                        "risk": v.risk,
+                        "label": v.label,
+                        "raw": v.raw_output,
+                        "ts": v.timestamp,
+                    }
+                    for v in recent
+                ]
+            )
 
         any_risk = any(v.get("label") == "Yes" for v in verdicts)
-
         self._write(
             {
                 "hook": "generation_post_call",
                 "session_id": getattr(payload, "session_id", ""),
                 "request_id": getattr(payload, "request_id", ""),
-                "output_preview": output_text[:300].replace("\n", " "),
+                "output_preview": output_text,
                 "latency_ms": latency,
                 "guardian_verdicts": verdicts,
                 "risk_detected": any_risk,
             }
         )
 
-        if any_risk:
-            flagged = [v["risk"] for v in verdicts if v.get("label") == "Yes"]
-            LOGGER.warning(
-                "[audit] RISK DETECTED — flagged risks: %s", ", ".join(flagged)
-            )
-
     # ── Component hooks ─────────────────────────────────────────────
-
     @hook(HookType.COMPONENT_PRE_EXECUTE, mode=PluginMode.FIRE_AND_FORGET)
     async def log_component_start(self, payload: Any, ctx: Any) -> None:
         self._write(
@@ -169,7 +168,6 @@ class AuditTrailPlugin(
         )
 
     # ── Validation hooks ────────────────────────────────────────────
-
     @hook(HookType.VALIDATION_POST_CHECK, mode=PluginMode.FIRE_AND_FORGET)
     async def log_validation(self, payload: Any, ctx: Any) -> None:
         self._write(
@@ -182,7 +180,6 @@ class AuditTrailPlugin(
         )
 
     # ── Tool hooks (Pattern 3: LLM-directed tool calls) ──────────
-
     @hook(HookType.TOOL_PRE_INVOKE, mode=PluginMode.FIRE_AND_FORGET)
     async def log_tool_pre(self, payload: Any, ctx: Any) -> None:
         """Log tool call before execution."""
@@ -192,7 +189,7 @@ class AuditTrailPlugin(
                 "hook": "tool_pre_invoke",
                 "session_id": getattr(payload, "session_id", ""),
                 "tool_name": getattr(tool_call, "name", "unknown"),
-                "tool_args": str(getattr(tool_call, "args", {}))[:300],
+                "tool_args": str(getattr(tool_call, "args", {})),
                 "governance": "pattern3_llm_directed",
             }
         )
@@ -213,24 +210,25 @@ class AuditTrailPlugin(
                 for v in self.guardian_plugin.all_verdicts
                 if v.risk.startswith("tool:")
             ]
-            verdicts = [
-                {
-                    "risk": v.risk,
-                    "label": v.label,
-                    "raw": v.raw_output,
-                    "ts": v.timestamp,
-                }
-                for v in recent[-len(getattr(self.guardian_plugin, "risks", [])) :]
-            ]
+            verdicts.extend(
+                [
+                    {
+                        "risk": v.risk,
+                        "label": v.label,
+                        "raw": v.raw_output,
+                        "ts": v.timestamp,
+                    }
+                    for v in recent[-len(getattr(self.guardian_plugin, "risks", [])) :]
+                ]
+            )
 
         any_risk = any(v.get("label") == "Yes" for v in verdicts)
-
         self._write(
             {
                 "hook": "tool_post_invoke",
                 "session_id": getattr(payload, "session_id", ""),
                 "tool_name": tool_name,
-                "tool_args": str(getattr(tool_call, "args", {}))[:300],
+                "tool_args": str(getattr(tool_call, "args", {})),
                 "output_preview": tool_output[:300],
                 "execution_time_ms": payload.execution_time_ms,
                 "success": payload.success,
@@ -241,12 +239,7 @@ class AuditTrailPlugin(
             }
         )
 
-        if any_risk:
-            flagged = [v["risk"] for v in verdicts if v.get("label") == "Yes"]
-            LOGGER.warning("[audit] TOOL RISK — %s: %s", tool_name, ", ".join(flagged))
-
     # ── Summary ─────────────────────────────────────────────────────
-
     def summary(self) -> dict:
         """Return a summary of the audit trail for display."""
         total = len(self._entries)
