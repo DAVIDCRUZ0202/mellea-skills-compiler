@@ -61,26 +61,15 @@ def _run_single_fixture(pipeline_fn: Callable, fixture: Dict):
     report = None
     try:
         context = fixture["context"]
-
-        # Unpack dict context as kwargs (Pattern 2 pipelines expect keyword args)
         if isinstance(context, dict):
             report = pipeline_fn(**context)
         else:
             report = pipeline_fn(context)
-
         LOGGER.info("Pipeline executed successfully.")
-
-        # Log key fields if available
-        for field in ["location", "weather_data", "action", "summary"]:
-            if hasattr(report, field) and getattr(report, field):
-                LOGGER.info("  %s: %s", field, str(getattr(report, field))[:100])
-
     except PluginViolationError as e:
-        print()
-        LOGGER.warning("Pipeline BLOCKED by Guardian enforcement: %s", e.reason)
-        LOGGER.warning("  The decomposed pipeline was halted because a generation")
-        LOGGER.warning("  triggered a Guardian risk detection in ENFORCE mode.")
-        print()
+        LOGGER.warning(
+            f"Pipeline BLOCKED by Guardian enforcement. The decomposed pipeline was halted because a generation triggered a Guardian risk detection in ENFORCE mode. {e.reason}"
+        )
 
     return report
 
@@ -280,9 +269,6 @@ def full_pipeline(
 
     # Log policy artifacts
     LOGGER.info("Guardian risks: %d", len(manifest.risks))
-    for r in manifest.risks:
-        tier = "native" if r.is_native else "custom"
-        LOGGER.info("    - %s (%s)", r.name, tier)
     LOGGER.info("Governance actions: %d", len(manifest.governance_actions))
     LOGGER.info("Policy manifest: %s", manifest_path)
     LOGGER.info("Policy document: %s", policy_path)
@@ -305,7 +291,7 @@ def full_pipeline(
     print()
     LOGGER.info("Running decomposed pipeline from %s...", pipeline_dir.name)
     LOGGER.info(f"  - Fixture: {fixture["id"]}")
-    LOGGER.info("  - Guardian checks every generation (pre + post).")
+    LOGGER.info(f"  - Guardian checks [{pipeline_mode}] every generation (pre + post).")
     LOGGER.info("  - Audit Trail checks every end points (pre + post).")
 
     try:

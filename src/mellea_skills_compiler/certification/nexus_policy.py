@@ -50,7 +50,7 @@ def generate_policy_manifest(
     )
 
     identified_risks = risk_lists.get("risks", [])
-    LOGGER.info("AI Atlas Nexus: %d risks identified", len(identified_risks))
+    LOGGER.info(f"AI Atlas Nexus risks: {len(identified_risks)}")
 
     nexus_risks = []
     nexus_additional_risks = []

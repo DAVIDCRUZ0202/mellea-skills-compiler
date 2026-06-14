@@ -28,12 +28,12 @@ Usage (Nexus-driven — risks from policy manifest):
 
 from __future__ import annotations
 
-import logging
 import urllib.error
 from typing import Any, List, Optional
 
 from mellea.plugins import HookType, Plugin, PluginMode, hook
 from mellea.plugins.registry import block
+from rich.console import Console
 
 from mellea_skills_compiler.enums import (
     GovernanceTaxonomy,
@@ -47,6 +47,7 @@ from mellea_skills_compiler.toolkit.logging import configure_logger
 
 
 LOGGER = configure_logger()
+console = Console()
 
 
 def _parse_guardian_score(text: str) -> str:
@@ -106,7 +107,7 @@ def _call_guardian(
         guardian = InferenceService(inference_engine).guardian(
             guardian_model, parameters={"temperature": 0}
         )
-        raw_predictions = guardian.chat(all_messages, verbose=True)
+        raw_predictions = guardian.chat(all_messages, verbose=False)
         labels = [
             _parse_guardian_score(raw_prediction.prediction)
             for raw_prediction in raw_predictions
@@ -158,12 +159,8 @@ def _run_guardian_post_checks(
         inference_engine,
     )
     for verdict in verdicts:
-        LOGGER.log(
-            logging.WARNING if verdict.label == "Yes" else logging.INFO,
-            "[guardian-post] risk=%s label=%s output_preview=%.60s",
-            verdict.risk,
-            verdict.label,
-            assistant_text.replace("\n", " "),
+        console.print(
+            f"[blue]Plugin-\\[guardian-post][/]\n  [white]risk={verdict.risk}\n  label={verdict.label}\n  output_preview={assistant_text.replace("\n", " ")[0:60]}[/]"
         )
 
     # Stash verdicts in user_metadata for audit_trail_hook to pick up
@@ -209,16 +206,8 @@ def _run_guardian_pre_checks(
         inference_engine,
     )
     for verdict in verdicts:
-        LOGGER.log(
-            (
-                logging.WARNING
-                if verdict.label == "Yes"
-                else (logging.ERROR if verdict.label == "Failed" else logging.INFO)
-            ),
-            "[guardian-pre] risk=%s label=%s input_preview=%.60s",
-            verdict.risk,
-            verdict.label,
-            user_text.replace("\n", " "),
+        console.print(
+            f"[blue]Plugin-\\[guardian-pre][/]\n  [white]risk={verdict.risk}\n  label={verdict.label}\n  input_preview={user_text.replace("\n", " ")[0:60]}[/]"
         )
     return verdicts
 
@@ -252,7 +241,6 @@ class GuardianPlugin(BasePlugin):
             guardian_model: The guardian model
             inference_engine: The inference engine, defaults to Ollama
         """
-
         self.risks = manifest.risks or self.get_default_risks()
         self.taxonomy = manifest.taxonomy
         self.all_verdicts: List[GuardianVerdict] = []
@@ -279,8 +267,7 @@ class GuardianPlugin(BasePlugin):
         native = [r for r in self.risks if r.is_native]
         custom = [r for r in self.risks if not r.is_native]
         LOGGER.info(
-            "Guardian plugin registered (%s): %d risks — %d native, %d custom criteria",
-            self._PLUGIN_MODE,
+            "Guardian plugin registered: %d risks — %d native, %d custom criteria",
             len(self.risks),
             len(native),
             len(custom),
@@ -420,9 +407,11 @@ class GuardianEnforcePlugin(
         flagged = [v.risk for v in verdicts if v.label == "Yes"]
         if flagged:
             risk_list = ", ".join(flagged)
-            LOGGER.warning(
-                "[guardian-enforce-pre] BLOCKING INPUT — risks flagged: %s", risk_list
+            print()
+            console.print(
+                f"[yellow]Plugin-\\[guardian-pre-enforce][/]\n  BLOCKING INPUT — risks flagged: {risk_list}"
             )
+            console.print()
             return block(
                 reason=f"Guardian detected input risks: {risk_list}",
                 code="guardian_input_risk_detected",
@@ -439,11 +428,13 @@ class GuardianEnforcePlugin(
         flagged = [v.risk for v in verdicts if v.label == "Yes"]
         if flagged:
             risk_list = ", ".join(flagged)
-            LOGGER.warning(
-                "[guardian-enforce-post] BLOCKING OUTPUT — risks flagged: %s", risk_list
+            print()
+            console.print(
+                f"[yellow]Plugin-\\[guardian-post-enforce][/]\n  BLOCKING OUTPUT — risks flagged: {risk_list}"
             )
+            console.print()
             return block(
-                reason=f"Guardian detected output risks: {risk_list}",
+                reason=f"Guardian detected output risks - [{risk_list}]",
                 code="guardian_output_risk_detected",
                 details={"flagged_risks": flagged, "stage": "post_generation"},
             )

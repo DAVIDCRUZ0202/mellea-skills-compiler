@@ -78,7 +78,6 @@ class PolicyManifest:
         if path:
             with open(path, "w") as f:
                 f.write(data)
-            LOGGER.info("Policy manifest written to %s", path)
         return data
 
     @classmethod
