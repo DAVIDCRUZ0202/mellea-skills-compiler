@@ -97,6 +97,16 @@ def run_pipeline(
     guardian_plugin = None
     audit_plugin = None
 
+    # Verify skill pipeline directory exists
+    if pipeline_dir.exists():
+        # Verify that given path is a directory
+        if not pipeline_dir.is_dir():
+            raise ValueError(
+                "The specified path is not a directory. Please note that the run command only accepts a compiled skill directory."
+            )
+    else:
+        raise FileNotFoundError(f"Skill pipeline directory not found: {pipeline_dir}")
+
     # Get guardian mode - AUDIT or ENFORCE
     guardian_mode = GaurdianMode("enforce" if enforce else "audit")
 
@@ -170,7 +180,7 @@ def run_pipeline(
             guardian_verdict=guardian_plugin.summary() if guardian_plugin else None,
             fixture_summary={"name": fixture, "output": output},
             audit_summary=audit_plugin.summary() if audit_plugin else None,
-            guardian_audit_dir=audit_dir if guardian_plugin else None,
+            guardian_audit_dir=output_dir if audit_plugin else None,
         )
 
     except Exception as e:
