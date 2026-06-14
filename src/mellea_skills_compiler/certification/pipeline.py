@@ -128,7 +128,8 @@ def skill_pipeline(
                     )
                     guardian_plugin.register()
                     audit_plugin = AuditTrailPlugin(
-                        output_dir=audit_dir, guardian_plugin=guardian_plugin
+                        log_path=audit_dir / "audit_trail.jsonl",
+                        guardian_plugin=guardian_plugin,
                     )
                     audit_plugin.register()
         except Exception as e:
@@ -154,7 +155,7 @@ def skill_pipeline(
         output = _run_single_fixture(pipeline_fn, fixture)
 
         # output
-        console.print("[bold blue]OUTPUT:[/]")
+        console.print("\n[bold blue]OUTPUT:[/]")
         print(output)
 
     except Exception as e:
