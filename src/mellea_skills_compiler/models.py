@@ -5,7 +5,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from typing import Any, Dict, List, Union
 
-from mellea_skills_compiler.enums import CoverageLevel, GaurdianMode, GovernanceTaxonomy
+from mellea_skills_compiler.enums import CoverageLevel, GovernanceTaxonomy, GuardianMode
 from mellea_skills_compiler.toolkit.logging import configure_logger
 
 
@@ -149,7 +149,7 @@ class GuardianVerdict:
 
 @dataclass
 class RunResult:
-    guardian_mode: GaurdianMode
+    guardian_mode: GuardianMode
     guardian_verdict: Dict[str, List[GuardianVerdict]]
     fixture_summary: Dict[str, Any]
     audit_summary: Dict[str, Any]

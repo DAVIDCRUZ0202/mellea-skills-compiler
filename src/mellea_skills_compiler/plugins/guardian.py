@@ -227,10 +227,10 @@ def _run_guardian_pre_checks(
 
 class GuardianPluginFactory:
 
-    def create(guardian_mode: GaurdianMode, *args, **kwargs):
+    def create(guardian_mode: GuardianMode, *args, **kwargs):
         guardian_plugin_class = (
             GuardianEnforcePlugin
-            if guardian_mode == GaurdianMode.ENFORCE
+            if guardian_mode == GuardianMode.ENFORCE
             else GuardianAuditPlugin
         )
         return guardian_plugin_class(*args, **kwargs)
