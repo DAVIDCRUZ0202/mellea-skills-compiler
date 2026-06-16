@@ -226,7 +226,7 @@ def mirror_dir_contents_to_target(
             if source.is_dir():
                 shutil.copytree(source, target, dirs_exist_ok=True)
             else:
-                shutil.copy(source, target)
+                shutil.copy2(source, target)
             mirrored.append(source.name)
         except Exception as e:
             LOGGER.warning(f"Failed to mirror {source.name}: {e}")

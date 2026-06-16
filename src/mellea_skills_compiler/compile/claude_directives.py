@@ -134,7 +134,7 @@ def build_system_prompt(
 
     ``package_name`` is the wrapper-derived Rule OUT-2 name (e.g.
     ``weather_mellea``) substituted into the prompt body so the LLM uses the
-    same name the wrapper computes for ``mirror_companion_dirs`` and the
+    same name the wrapper computes for ``mirror_dir_contents_to_target`` and the
     post-session ``*_mellea`` discovery. Previously the prompt carried the
     literal placeholder ``<package_name>`` and the LLM re-derived the name
     from the frontmatter — a long/complex name (e.g.

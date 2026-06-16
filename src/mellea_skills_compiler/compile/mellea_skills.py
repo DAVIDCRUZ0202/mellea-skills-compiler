@@ -6,7 +6,7 @@ import subprocess
 import threading
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Dict, Optional
 from urllib.parse import urlparse
 
 from anthropic import Anthropic
@@ -124,7 +124,7 @@ def _get_spec_md_path(spec_path: Path) -> Optional[Path]:
     return spec_file_path
 
 
-def _derive_mellea_package_name(spec_path: Path, frontmatter: dict | None) -> str:
+def _derive_mellea_package_name(spec_path: Path, frontmatter: Optional[Dict]) -> str:
     """Apply Rule OUT-2 (lowercase, hyphens/spaces → underscores, append `_mellea`).
 
     For .md sources, prefer the frontmatter `name:` field; fall back to the
@@ -237,28 +237,39 @@ def compile(
             f"The skill specification file or directory cannot be found: {spec_path}"
         )
 
-    # Derive and create spec related fields
+    # Get spec related fields
+    spec_frontmatter: Optional[Dict] = None
     spec_dir = spec_path if spec_path.is_dir() else spec_path.parent
     spec_md_path = _get_spec_md_path(spec_path)
     try:
-        spec_frontmatter = parse_spec_file(spec_md_path).get("frontmatter")
+        if spec_md_path:
+            spec_frontmatter = parse_spec_file(spec_md_path).get("frontmatter")
     except Exception as e:
         LOGGER.warning(f"Failed to parse spec file {spec_md_path}: {e}")
 
-    # print specs frontmatter if available
-    rprint(
-        Panel(
-            json.dumps(
-                spec_frontmatter or {"Name": spec_path.name},
-                indent=2,
-            ),
-            title="Specification",
-            subtitle=str(spec_path),
+    if spec_frontmatter:
+        rprint(
+            Panel(
+                json.dumps(spec_frontmatter, indent=2),
+                title="Specification",
+                subtitle=str(spec_path),
+            )
         )
-    )
+    else:
+        rprint(
+            Panel(
+                f"Name: {spec_path.name.replace("_"," ").title()}\nPath: {str(spec_path)}",
+                title="Specification",
+            )
+        )
 
     # Check and verify claude model
-    available_models = [model.id for model in Anthropic().models.list()]
+    available_models = None
+    try:
+        available_models = [model.id for model in Anthropic().models.list()]
+    except Exception as e:
+        raise Exception(f"Unable to connect to Anthropic API - {str(e)}")
+
     if not available_models:
         raise ValueError(f"No claude models available with your API key.")
 
