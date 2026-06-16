@@ -28,17 +28,21 @@ Usage (Nexus-driven — risks from policy manifest):
 
 from __future__ import annotations
 
+import json
 import urllib.error
 from copy import deepcopy
 from typing import Any, List, Optional
 
+from mellea.core.requirement import Requirement
 from mellea.plugins import HookType, Plugin, PluginMode, hook
 from mellea.plugins.registry import block
+from mellea.stdlib.components.genstub import SyncGenerativeStub
+from mellea.stdlib.components.instruction import Instruction
 from rich.console import Console
 
 from mellea_skills_compiler.enums import (
-    GaurdianMode,
     GovernanceTaxonomy,
+    GuardianMode,
     InferenceEngineType,
 )
 from mellea_skills_compiler.inference import InferenceService
@@ -179,28 +183,44 @@ def _run_guardian_pre_checks(
     if action is None:
         return []
 
-    # Extract user text
-    user_text = (
-        getattr(action, "description", None)
-        or getattr(action, "_description", None)
-        or getattr(action, "_arguments", None)
-        or action
-    )
-    user_text = getattr(user_text, "value", None) or str(user_text)
-    if not user_text:
+    # Get input text from the action component
+    input_text = action.format_for_llm().args
+    if isinstance(action, SyncGenerativeStub):
+        input_text = str(input_text["arguments"])
+    elif isinstance(action, Instruction):
+        input_text_clean = {}
+        for k, v in input_text.items():
+            if v:
+                input_text_clean.update({k: v})
+        input_text = json.dumps(input_text_clean, default=lambda x: str(x), indent=2)
+    elif isinstance(action, Requirement):
+        # No need to assess Requirement here as post generation output is more likely to
+        # be the right place for monitoring.
+        return []
+    else:
+        # Fallback extraction of input text
+        input_text = (
+            getattr(action, "description", None)
+            or getattr(action, "_description", None)
+            or getattr(action, "_arguments", None)
+            or action
+        )
+        input_text = getattr(input_text, "value", None) or str(input_text)
+
+    if not input_text:
         return []
 
     assistant_text = None
     verdicts: List[GuardianVerdict] = _call_guardian(
         risks,
-        user_text,
+        input_text,
         assistant_text,
         guardian_model,
         inference_engine,
     )
     for verdict in verdicts:
         console.print(
-            f"[blue]Plugin-\\[guardian-pre][/]\n  [white]risk={verdict.risk}\n  label={verdict.label}\n  input_preview={user_text.replace("\n", " ")[0:90]}[/]"
+            f"[blue]Plugin-\\[guardian-pre][/]\n  [white]risk={verdict.risk}\n  label={verdict.label}\n  input_preview={input_text.replace("\n", " ")[0:90]}[/]"
         )
     return verdicts
 
@@ -293,7 +313,7 @@ class GuardianAuditPlugin(
     which returns a ``GuardianEnforcePlugin`` instead.
     """
 
-    _PLUGIN_MODE = GaurdianMode.AUDIT
+    _PLUGIN_MODE = GuardianMode.AUDIT
 
     def __init__(
         self,
@@ -386,7 +406,7 @@ class GuardianEnforcePlugin(
     with a PluginViolationError.
     """
 
-    _PLUGIN_MODE = GaurdianMode.ENFORCE
+    _PLUGIN_MODE = GuardianMode.ENFORCE
 
     def __init__(
         self,
@@ -448,7 +468,7 @@ class GuardianEnforcePlugin(
         tool_call = payload.model_tool_call
         tool_name = getattr(tool_call, "name", "unknown")
         args = getattr(tool_call, "args", {})
-        LOGGER.info("[guardian-enforce-tool-pre] %s(%s)", tool_name, str(args)[:100])
+        LOGGER.info("[guardian-pre-tool-enforce] %s(%s)", tool_name, str(args)[:100])
         return None
 
     @hook(HookType.TOOL_POST_INVOKE, mode=PluginMode.SEQUENTIAL)

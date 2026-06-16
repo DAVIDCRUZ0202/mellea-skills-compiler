@@ -88,6 +88,7 @@ class AuditTrailPlugin(
                 "hook": "generation_pre_call",
                 "session_id": getattr(payload, "session_id", ""),
                 "request_id": getattr(payload, "request_id", ""),
+                "component_type": type(payload.action).__name__,
                 "input_preview": input_preview,
                 "model_options": dict(getattr(payload, "model_options", {})),
             }

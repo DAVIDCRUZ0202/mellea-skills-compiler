@@ -56,7 +56,7 @@ class CoverageLevel(Enum):
     MANUAL = "MANUAL"
 
 
-class GaurdianMode(Enum):
+class GuardianMode(Enum):
     DISABLED = "disabled"
     ENFORCE = "enforce"
     AUDIT = "audit"

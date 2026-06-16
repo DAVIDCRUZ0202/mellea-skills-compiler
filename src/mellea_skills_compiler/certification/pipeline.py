@@ -34,7 +34,7 @@ from mellea_skills_compiler.certification.report import (
     load_audit_trail,
 )
 from mellea_skills_compiler.enums import (
-    GaurdianMode,
+    GuardianMode,
     InferenceEngineType,
     SpecFileFormat,
 )
@@ -108,7 +108,7 @@ def run_pipeline(
         raise FileNotFoundError(f"Skill pipeline directory not found: {pipeline_dir}")
 
     # Get guardian mode - AUDIT or ENFORCE
-    guardian_mode = GaurdianMode("enforce" if enforce else "audit")
+    guardian_mode = GuardianMode("enforce" if enforce else "audit")
 
     if no_guardian:
         LOGGER.info("Guardian checks disabled (--no-guardian)")
@@ -230,7 +230,7 @@ def full_pipeline(
     fixture = _get_fixture(fixture_id, fixtures)
 
     # Get guardian mode - AUDIT or ENFORCE
-    guardian_mode = GaurdianMode("enforce" if enforce else "audit")
+    guardian_mode = GuardianMode("enforce" if enforce else "audit")
 
     print()
     LOGGER.info("=" * 70)
