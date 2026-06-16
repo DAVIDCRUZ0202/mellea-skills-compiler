@@ -242,16 +242,20 @@ def compile(
     spec_dir = spec_path if spec_path.is_dir() else spec_path.parent
     spec_md_path = _get_spec_md_path(spec_path)
     try:
-        spec_frontmatter = parse_spec_file(spec_md_path).get("frontmatter")
-        if spec_frontmatter:
-            rprint(
-                Panel(
-                    json.dumps(spec_frontmatter, indent=2),
-                    title="Specification",
-                    subtitle=str(spec_path),
-                )
-            )
+        if spec_md_path:
+            spec_frontmatter = parse_spec_file(spec_md_path).get("frontmatter")
     except Exception as e:
+        LOGGER.warning(f"Failed to parse spec file {spec_md_path}: {e}")
+
+    if spec_frontmatter:
+        rprint(
+            Panel(
+                json.dumps(spec_frontmatter, indent=2),
+                title="Specification",
+                subtitle=str(spec_path),
+            )
+        )
+    else:
         rprint(
             Panel(
                 f"Name: {spec_path.name.replace("_"," ").title()}\nPath: {str(spec_path)}",
