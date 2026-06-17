@@ -1,5 +1,4 @@
 import json
-import shutil
 from pathlib import Path
 from typing import Optional
 
@@ -7,48 +6,6 @@ from mellea_skills_compiler.toolkit.logging import configure_logger
 
 
 LOGGER = configure_logger()
-
-# Rule OUT-2 — package name derivation; Rule OUT-6 — companion-directory mirror.
-# Kept here so the pre-mellea-fy mirror step can resolve the destination
-# without invoking the slash command.
-_COMPANION_DIRS = ("scripts", "references", "assets")
-
-
-def derive_package_name(spec_path: Path, frontmatter: dict | None) -> str:
-    """Apply Rule OUT-2 (lowercase, hyphens/spaces → underscores, append `_mellea`).
-
-    For .md sources, prefer the frontmatter `name:` field; fall back to the
-    parent directory name. For directory inputs (multi-file runtimes), use
-    the directory name.
-    """
-    if spec_path.is_dir():
-        raw = spec_path.name
-    else:
-        raw = (frontmatter or {}).get("name") or spec_path.parent.name
-    name = str(raw).lower().replace("-", "_").replace(" ", "_")
-    while "__" in name:
-        name = name.replace("__", "_")
-    name = name.strip("_") or "skill"
-    return f"{name}_mellea"
-
-
-def mirror_companion_dirs(skill_dir: Path, package_dir: Path) -> list[str]:
-    """Rule OUT-6 — mirror companion directories from skill root into the package.
-
-    Runs deterministically before mellea-fy so the LLM sees the mirrored
-    assets in <package_name>/ when it generates code, reinforcing the
-    package-relative path-resolution invariant. Returns the list of
-    directory names actually mirrored (for logging).
-    """
-    package_dir.mkdir(parents=True, exist_ok=True)
-    mirrored: list[str] = []
-    for asset_dir in _COMPANION_DIRS:
-        src = skill_dir / asset_dir
-        if src.is_dir():
-            dst = package_dir / asset_dir
-            shutil.copytree(src, dst, dirs_exist_ok=True)
-            mirrored.append(asset_dir)
-    return mirrored
 
 
 # Defaults for the LLM backend and model that compiled skills use at runtime.
@@ -177,7 +134,7 @@ def build_system_prompt(
 
     ``package_name`` is the wrapper-derived Rule OUT-2 name (e.g.
     ``weather_mellea``) substituted into the prompt body so the LLM uses the
-    same name the wrapper computes for ``mirror_companion_dirs`` and the
+    same name the wrapper computes for ``mirror_dir_contents_to_target`` and the
     post-session ``*_mellea`` discovery. Previously the prompt carried the
     literal placeholder ``<package_name>`` and the LLM re-derived the name
     from the frontmatter — a long/complex name (e.g.
