@@ -63,3 +63,8 @@ class GuardianMode(Enum):
 
     def __str__(self):
         return self.name
+
+
+class NexusRiskSource(StrEnum):
+    DEFAULT_FALLBACK = "default-fallback"
+    AI_ATLAS_NEXUS = "ai-atlas-nexus"

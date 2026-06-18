@@ -83,6 +83,25 @@ class AuditTrailPlugin(
         if action is None:
             return
         input_preview = dict(action.format_for_llm().args)
+
+        verdicts = []
+        if self.guardian_plugin is not None:
+            # Read the most recent verdicts from the Guardian plugin directly
+            recent = self.guardian_plugin.all_verdicts[
+                -len(self.guardian_plugin.risks) :
+            ]
+            verdicts.extend(
+                [
+                    {
+                        "risk": v.risk,
+                        "label": v.label,
+                        "raw": v.raw_output,
+                        "ts": v.timestamp,
+                    }
+                    for v in recent
+                ]
+            )
+
         self._write(
             {
                 "hook": "generation_pre_call",
@@ -90,6 +109,8 @@ class AuditTrailPlugin(
                 "request_id": getattr(payload, "request_id", ""),
                 "component_type": type(payload.action).__name__,
                 "input_preview": input_preview,
+                "risk_detected": any(v.get("label") == "Yes" for v in verdicts),
+                "guardian_verdicts": verdicts,
                 "model_options": dict(getattr(payload, "model_options", {})),
             }
         )
@@ -123,7 +144,6 @@ class AuditTrailPlugin(
                 ]
             )
 
-        any_risk = any(v.get("label") == "Yes" for v in verdicts)
         self._write(
             {
                 "hook": "generation_post_call",
@@ -131,8 +151,8 @@ class AuditTrailPlugin(
                 "request_id": getattr(payload, "request_id", ""),
                 "output_preview": output_text,
                 "latency_ms": latency,
+                "risk_detected": any(v.get("label") == "Yes" for v in verdicts),
                 "guardian_verdicts": verdicts,
-                "risk_detected": any_risk,
             }
         )
 
@@ -168,6 +188,7 @@ class AuditTrailPlugin(
                 "error": str(getattr(payload, "error", "")),
             }
         )
+
 
     # ── Validation hooks ────────────────────────────────────────────
     @hook(HookType.VALIDATION_POST_CHECK, mode=PluginMode.FIRE_AND_FORGET)

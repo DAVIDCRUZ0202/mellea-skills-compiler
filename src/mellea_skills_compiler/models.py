@@ -28,6 +28,7 @@ class NexusRisk:
     name: str
     description: str
     guardian_prompt: str  # tag (native) or description (custom)
+    source: str
     is_native: bool = False  # True when Nexus risk has a tag → calibrated Guardian path
     taxonomy: str = GovernanceTaxonomy.IBM_GRANITE_GUARDIAN
 

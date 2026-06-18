@@ -69,7 +69,7 @@ def _parse_guardian_score(text: str) -> str:
 
 def _call_guardian(
     risks: List[NexusRisk],
-    user_text: str,
+    input_text: str,
     assistant_text: Optional[str] = None,
     guardian_model: Optional[str] = None,
     inference_engine: Optional[str] = None,
@@ -102,15 +102,15 @@ def _call_guardian(
     risk_names = [r.name for r in risks]
     for guardian_prompt in guardian_prompts:
         messages = [{"role": "system", "content": guardian_prompt}]
-        if user_text:
-            messages.append({"role": "user", "content": user_text})
+        if input_text:
+            messages.append({"role": "user", "content": input_text})
         if assistant_text:
             messages.append({"role": "assistant", "content": assistant_text})
         all_messages.append(messages)
 
     try:
         guardian = InferenceService(inference_engine).guardian(
-            guardian_model, parameters={"temperature": 0}
+            guardian_model, parameters={"temperature": 0, "num_ctx": 8192}
         )
         raw_predictions = guardian.chat(all_messages, verbose=False)
         labels = [
@@ -141,6 +141,11 @@ def _run_guardian_post_checks(
     if model_output is None:
         return []
 
+    if isinstance(model_output._action, Requirement):
+        # No need to assess Requirement output here as the final post generation output
+        # is more suitable place for monitoring.
+        return []
+
     assistant_text = getattr(model_output, "value", None) or ""
     if not assistant_text:
         return []
@@ -148,24 +153,24 @@ def _run_guardian_post_checks(
     # Reconstruct the user prompt from the payload
     prompt = payload.prompt
     if isinstance(prompt, list):
-        user_text = ""
+        input_text = ""
         for msg in reversed(list(prompt)):
             if isinstance(msg, dict) and msg.get("role") == "user":
-                user_text = msg.get("content", "")
+                input_text = msg.get("content", "")
                 break
     else:
-        user_text = str(prompt) if prompt else ""
+        input_text = str(prompt) if prompt else ""
 
     verdicts: List[GuardianVerdict] = _call_guardian(
         risks,
-        user_text,
+        input_text,
         assistant_text,
         guardian_model,
         inference_engine,
     )
     for verdict in verdicts:
         console.print(
-            f"[blue]Plugin-\\[guardian-post][/]\n  [white]risk={verdict.risk}\n  label={verdict.label}\n  output_preview={assistant_text.replace("\n", " ")[0:90]}[/]"
+            f"Plugin-[green]\\[guardian-post][/]\n  [white]risk={verdict.risk}\n  label={verdict.label}\n  output_preview={assistant_text.replace("\n", " ")[0:90]}[/]"
         )
     return verdicts
 
@@ -189,16 +194,16 @@ def _run_guardian_pre_checks(
         input_text = str(input_text["arguments"])
     elif isinstance(action, Instruction):
         input_text_clean = {}
-        for k, v in input_text.items():
-            if v:
-                input_text_clean.update({k: v})
+        for key, value in input_text.items():
+            if value:
+                input_text_clean.update({key: value})
         input_text = json.dumps(input_text_clean, default=lambda x: str(x), indent=2)
     elif isinstance(action, Requirement):
-        # No need to assess Requirement here as post generation output is more likely to
-        # be the right place for monitoring.
+        # No need to assess Requirement here as the final post generation output
+        # is more suitable place for monitoring
         return []
     else:
-        # Fallback extraction of input text
+        # Fallback method to extract input text
         input_text = (
             getattr(action, "description", None)
             or getattr(action, "_description", None)
@@ -220,7 +225,7 @@ def _run_guardian_pre_checks(
     )
     for verdict in verdicts:
         console.print(
-            f"[blue]Plugin-\\[guardian-pre][/]\n  [white]risk={verdict.risk}\n  label={verdict.label}\n  input_preview={input_text.replace("\n", " ")[0:90]}[/]"
+            f"Plugin-[blue]\\[guardian-pre][/]\n  [white]risk={verdict.risk}\n  label={verdict.label}\n  input_preview={input_text.replace("\n", " ")[0:90]}[/]"
         )
     return verdicts
 
@@ -254,27 +259,11 @@ class GuardianPlugin(BasePlugin):
             guardian_model: The guardian model
             inference_engine: The inference engine, defaults to Ollama
         """
-        self.risks = manifest.risks or self.get_default_risks()
+        self.risks = manifest.risks
         self.taxonomy = manifest.taxonomy
         self.all_verdicts: List[GuardianVerdict] = []
         self.guardian_model = guardian_model
         self.inference_engine = inference_engine
-
-    def get_default_risks(self):
-        return [
-            NexusRisk(
-                name=risk,
-                description="",
-                guardian_prompt=risk,
-                is_native=True,
-                taxonomy=GovernanceTaxonomy.IBM_GRANITE_GUARDIAN,
-            )
-            for risk in [
-                "harm",
-                "social_bias",
-                "jailbreak",
-            ]
-        ]
 
     def register(self) -> None:
         native = [r for r in self.risks if r.is_native]
@@ -285,11 +274,6 @@ class GuardianPlugin(BasePlugin):
             len(native),
             len(custom),
         )
-        for r in native:
-            LOGGER.info("  [native]  %s → %s", r.name, r.guardian_prompt)
-        for r in custom:
-            LOGGER.info("  [custom]  %s → %.60s", r.name, r.guardian_prompt)
-
         super().register()
 
     def summary(self) -> dict:

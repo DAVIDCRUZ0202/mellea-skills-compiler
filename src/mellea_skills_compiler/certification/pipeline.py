@@ -297,8 +297,6 @@ def full_pipeline(
     policy_path.write_text(policy_md)
 
     # Log policy artifacts
-    LOGGER.info("Guardian risks: %d", len(manifest.risks))
-    LOGGER.info("Governance actions: %d", len(manifest.governance_actions))
     LOGGER.info("Policy manifest: %s", manifest_path)
     LOGGER.info("Policy document: %s", policy_path)
 

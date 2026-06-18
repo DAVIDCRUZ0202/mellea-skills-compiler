@@ -6,7 +6,11 @@ from collections import defaultdict
 from pathlib import Path
 from typing import List, Optional
 
-from mellea_skills_compiler.enums import GovernanceTaxonomy, InferenceEngineType
+from mellea_skills_compiler.enums import (
+    GovernanceTaxonomy,
+    InferenceEngineType,
+    NexusRiskSource,
+)
 from mellea_skills_compiler.inference import InferenceService
 from mellea_skills_compiler.models import GovernanceAction, NexusRisk, PolicyManifest
 from mellea_skills_compiler.toolkit.logging import configure_logger
@@ -14,6 +18,22 @@ from mellea_skills_compiler.toolkit.logging import configure_logger
 
 LOGGER = configure_logger()
 
+def get_default_risks():
+    return [
+        NexusRisk(
+            name=risk,
+            description="",
+            guardian_prompt=risk,
+            source = NexusRiskSource.DEFAULT_FALLBACK,
+            is_native=True,
+            taxonomy=GovernanceTaxonomy.IBM_GRANITE_GUARDIAN,
+        )
+        for risk in [
+            "harm",
+            "social_bias",
+            "jailbreak",
+        ]
+    ]
 
 def generate_policy_manifest(
     use_case: str,
@@ -52,8 +72,8 @@ def generate_policy_manifest(
     identified_risks = risk_lists.get("risks", [])
     LOGGER.info(f"AI Atlas Nexus risks: {len(identified_risks)}")
 
-    nexus_risks = []
-    nexus_additional_risks = []
+    risks = []
+    additional_risks = []
 
     for risk in identified_risks:
         description = guardian_prompt = getattr(risk, "description", "").strip()
@@ -62,30 +82,37 @@ def generate_policy_manifest(
         if risk.isDefinedByTaxonomy == GovernanceTaxonomy.IBM_GRANITE_GUARDIAN:
             guardian_prompt = risk.tag if risk.tag else guardian_prompt
             is_native = True if risk.tag else False
-
-            nexus_risks.append(
+            risks.append(
                 NexusRisk(
                     name=risk.name,
                     description=description,
                     guardian_prompt=guardian_prompt,
+                    source = NexusRiskSource.AI_ATLAS_NEXUS,
                     is_native=is_native,
                     taxonomy=risk.isDefinedByTaxonomy,
                 )
             )
-            LOGGER.info(
-                f"  [Guardian] {risk.name} ({"native" if is_native else "custom"}) → {guardian_prompt[:60]}"
-            )
         else:
-            nexus_additional_risks.append(
+            additional_risks.append(
                 NexusRisk(
                     name=risk.name,
                     description=description,
                     guardian_prompt=guardian_prompt,
+                    source = NexusRiskSource.AI_ATLAS_NEXUS,
                     is_native=False,
                     taxonomy=risk.isDefinedByTaxonomy,
                 )
             )
-            # LOGGER.info(f"  [Risk] {risk.name} (custom) → {guardian_prompt[:60]}")
+
+    if not risks:
+        risks = get_default_risks()
+        LOGGER.warning("")
+
+    LOGGER.info("Guardian risks: %d", len(risks))
+    for risk in risks:
+        LOGGER.info(
+            f"  [Guardian] {risk.name} ({"native" if risk.is_native else "custom"}) → {risk.guardian_prompt[:60]}"
+        )
 
     # -- 2. Use the actions which are directly linked the risks
     identified_risks_governance_actions = risk_lists.get("mixed_control_items", [])
@@ -102,12 +129,13 @@ def generate_policy_manifest(
                 categorized_as=governance_item.isCategorizedAs,
             )
         )
+    LOGGER.info("Governance actions: %d", len(governance_actions))
 
     return PolicyManifest(
         use_case=use_case,
         taxonomy=governance_taxonomies,
-        risks=nexus_risks,
-        additional_risks=nexus_additional_risks,
+        risks=risks,
+        additional_risks=additional_risks,
         governance_actions=governance_actions,
         governance_taxonomies=governance_taxonomies,
         model=risk_inference_engine.model_name_or_path,
