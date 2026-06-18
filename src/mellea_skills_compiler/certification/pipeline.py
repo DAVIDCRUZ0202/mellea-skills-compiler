@@ -36,6 +36,7 @@ from mellea_skills_compiler.certification.report import (
 from mellea_skills_compiler.enums import (
     GuardianMode,
     InferenceEngineType,
+    NexusRiskSource,
     SpecFileFormat,
 )
 from mellea_skills_compiler.models import PolicyManifest, RunResult
@@ -407,13 +408,13 @@ def full_pipeline(
     LOGGER.info(f"  Report generated: {cert_path}")
 
     # ── Final summary ─────────────────────────────────────────────────
-    LOGGER.info("")
+    print("")
     any_risk = any(v.label == "Yes" for v in guardian_plugin.all_verdicts)
     LOGGER.info("=" * 70)
     skill_name = frontmatter.get("name", "unknown")
     LOGGER.info(f"COMPLETE — {skill_name} [{guardian_mode} mode]")
     LOGGER.info("=" * 70)
-    LOGGER.info("")
+    print("")
     LOGGER.info("  Skill: %s (%s)", skill_name, sensitivity["tier_display"])
     LOGGER.info("  Fixture: %s", fixture["id"])
     LOGGER.info("  Guardian risks: %d (from Nexus)", len(manifest.risks))
@@ -437,6 +438,10 @@ def full_pipeline(
     LOGGER.info("    audit_trail.jsonl    — Runtime Audit Trail")
     LOGGER.info("    CERTIFICATION.md     — Certification Report")
     LOGGER.info("")
+
+    if all(risk.source == NexusRiskSource.DEFAULT_FALLBACK for risk in manifest.risks):
+        LOGGER.warning(f" This certification report is based on generic fail-safe risk screening - {[risk.name for risk in manifest.risks]}. The risks identified are not specific to the intended use-case.")
+        LOGGER.info("")
 
     if any_risk:
         LOGGER.warning("  STATUS: RISKS DETECTED — review audit trail")

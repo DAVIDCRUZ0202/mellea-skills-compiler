@@ -18,7 +18,7 @@ from mellea_skills_compiler.toolkit.logging import configure_logger
 
 LOGGER = configure_logger()
 
-def get_default_risks():
+def _get_fail_safe_risks():
     return [
         NexusRisk(
             name=risk,
@@ -105,8 +105,12 @@ def generate_policy_manifest(
             )
 
     if not risks:
-        risks = get_default_risks()
-        LOGGER.warning("")
+        LOGGER.warning(
+            "AI Atlas Nexus returned no Granite Guardian risks for this use case. "
+            "Falling back to default native risks: ['harm', 'social_bias', 'jailbreak']. "
+            "These are generic fail-safe defaults, NOT derived from use-case analysis. "
+        )
+        risks = _get_fail_safe_risks()
 
     LOGGER.info("Guardian risks: %d", len(risks))
     for risk in risks:
