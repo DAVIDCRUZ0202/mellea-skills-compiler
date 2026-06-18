@@ -18,12 +18,6 @@ Usage (enforce mode — blocks on risk):
     from guardian_hook import GuardianAuditPlugin
     plugin = GuardianAuditPlugin(risks=["harm", "jailbreak"], enforce=True)
     register(plugin)
-
-Usage (Nexus-driven — risks from policy manifest):
-    from nexus_policy import generate_policy_manifest
-    manifest = generate_policy_manifest("An AI agent that...")
-    plugin = GuardianAuditPlugin.from_manifest(manifest, enforce=True)
-    register(plugin)
 """
 
 from __future__ import annotations
@@ -86,7 +80,7 @@ def _call_guardian(
       - For custom criteria (no Nexus ``tag``): description text
         sent as free-form custom criteria.
 
-    This distinction is set upstream in ``nexus_policy.py`` via the
+    This distinction is set upstream in ``policy.py`` via the
     two-tier calling convention (see NexusRisk.is_native).
 
     When assistant_text is None, this is a pre-generation check on the

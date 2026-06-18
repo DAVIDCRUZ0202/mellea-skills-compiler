@@ -13,7 +13,7 @@ Pipeline:
 from pathlib import Path
 from typing import Optional
 
-from mellea_skills_compiler.certification import nexus_policy, skill_to_use_case
+from mellea_skills_compiler.certification import policy, skill_to_use_case
 from mellea_skills_compiler.certification.classification import (
     classify_governance_requirements,
     classify_skill_sensitivity,
@@ -106,14 +106,14 @@ def ingest_one(
     audit_dir.mkdir(exist_ok=True)
 
     # Genereate policy manifest
-    manifest = nexus_policy.generate_policy_manifest(
+    manifest = policy.generate_policy_manifest(
         use_case, nexus, model, inference_engine
     )
     manifest_path = audit_dir / "policy_manifest.json"
     manifest.to_json(manifest_path)
 
     # Generate policy markdown
-    policy_md = nexus_policy.generate_policy_markdown(manifest)
+    policy_md = policy.generate_policy_markdown(manifest)
     policy_path = audit_dir / "POLICY.md"
     policy_path.write_text(policy_md)
 

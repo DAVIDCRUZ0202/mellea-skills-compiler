@@ -24,7 +24,7 @@ from mellea_skills_compiler.certification.classification import (
     classify_governance_requirements,
 )
 from mellea_skills_compiler.certification.data import get_data_path
-from mellea_skills_compiler.certification.nexus_policy import (
+from mellea_skills_compiler.certification.policy import (
     generate_policy_manifest,
     generate_policy_markdown,
     load_policy_manifest,
