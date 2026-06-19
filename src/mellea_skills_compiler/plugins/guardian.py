@@ -526,7 +526,57 @@ class GuardianEnforcePlugin(
         tool_call = payload.model_tool_call
         tool_name = getattr(tool_call, "name", "unknown")
         args = getattr(tool_call, "args", {})
-        LOGGER.info("[guardian-pre-tool-enforce] %s(%s)", tool_name, str(args)[:100])
+
+        tool_risks = []
+        for risk in self.risks:
+            tool_risk = deepcopy(risk)
+            tool_risk.name = f"tool:{tool_risk.name}"
+            tool_risks.append(tool_risk)
+
+        # Run Guardian checks on tool input
+        verdicts: list[GuardianVerdict] = _call_guardian(
+            tool_risks,
+            input_text=f"Tool {tool_name} was called with arguments: {json.dumps(args, indent=2)}",
+            guardian_model=self.guardian_model,
+            inference_engine=self.inference_engine,
+        )
+        self.all_verdicts.extend(verdicts)
+
+        flagged = [v.risk for v in verdicts if v.label == GuardianScore.YES]
+        failed = [
+            v.risk
+            for v in verdicts
+            if v.label in [GuardianScore.ERROR, GuardianScore.FAILED]
+        ]
+        if failed:
+            console.print(
+                f"[yellow]Plugin-\\[guardian-post-tool-enforce][/]\n  BLOCKING TOOL INPUT — risks failed in {tool_name}: {failed}"
+            )
+            console.print()
+            return block(
+                reason=f"Guardian tool input risks assessment failed for {failed}",
+                code="guardian_tool_output_risk_failure",
+                details={
+                    "failed_risks": failed,
+                    "tool": tool_name,
+                    "stage": "pre_tool",
+                },
+            )
+        elif flagged:
+            console.print()
+            console.print(
+                f"[yellow]Plugin-\\[guardian-post-tool-enforce][/]\n  BLOCKING TOOL INPUT — risks in {tool_name}: {flagged}"
+            )
+            console.print()
+            return block(
+                reason=f"Guardian detected risks in {tool_name}: {flagged}",
+                code="guardian_tool_input_risk_detected",
+                details={
+                    "flagged_risks": flagged,
+                    "tool": tool_name,
+                    "stage": "pre_tool",
+                },
+            )
         return None
 
     @hook(HookType.TOOL_POST_INVOKE, mode=PluginMode.SEQUENTIAL)
@@ -548,7 +598,7 @@ class GuardianEnforcePlugin(
         # Run Guardian checks on tool output
         verdicts: list[GuardianVerdict] = _call_guardian(
             tool_risks,
-            user_text=f"Tool {tool_name} was called",
+            input_text=f"Tool {tool_name} was called",
             assistant_text=tool_output[:2000],
             guardian_model=self.guardian_model,
             inference_engine=self.inference_engine,
@@ -562,13 +612,12 @@ class GuardianEnforcePlugin(
             if v.label in [GuardianScore.ERROR, GuardianScore.FAILED]
         ]
         if failed:
-            risk_list = ", ".join(failed)
             console.print(
-                f"[yellow]Plugin-\\[guardian-pre-enforce][/]\n  BLOCKING TOOL OUTPUT — risks failed: {risk_list}"
+                f"[yellow]Plugin-\\[guardian-post-tool-enforce][/]\n  BLOCKING TOOL OUTPUT — risks failed in {tool_name}: {failed}"
             )
             console.print()
             return block(
-                reason=f"Guardian tool output risks assessment failed: {risk_list}",
+                reason=f"Guardian tool output risks assessment failed for {failed}",
                 code="guardian_tool_output_risk_failure",
                 details={
                     "failed_risks": failed,
@@ -577,15 +626,14 @@ class GuardianEnforcePlugin(
                 },
             )
         elif flagged:
-            risk_list = ", ".join(flagged)
             console.print()
             console.print(
-                f"[yellow]Plugin-\\[guardian-post-tool-enforce][/]\n  BLOCKING TOOL OUTPUT — risks in {tool_name} output: {risk_list}"
+                f"[yellow]Plugin-\\[guardian-post-tool-enforce][/]\n  BLOCKING TOOL OUTPUT — risks in {tool_name}: {flagged}"
             )
             console.print()
             return block(
-                reason=f"Guardian detected risks in tool output ({tool_name}): {risk_list}",
-                code="guardian_tool_risk_detected",
+                reason=f"Guardian detected risks in {tool_name}: {flagged}",
+                code="guardian_tool_output_risk_detected",
                 details={
                     "flagged_risks": flagged,
                     "tool": tool_name,
