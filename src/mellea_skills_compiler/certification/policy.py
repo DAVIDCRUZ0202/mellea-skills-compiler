@@ -18,13 +18,14 @@ from mellea_skills_compiler.toolkit.logging import configure_logger
 
 LOGGER = configure_logger()
 
+
 def _get_fail_safe_risks():
     return [
         NexusRisk(
             name=risk,
             description="",
             guardian_prompt=risk,
-            source = NexusRiskSource.DEFAULT_FALLBACK,
+            source=NexusRiskSource.DEFAULT_FALLBACK,
             is_native=True,
             taxonomy=GovernanceTaxonomy.IBM_GRANITE_GUARDIAN,
         )
@@ -34,6 +35,7 @@ def _get_fail_safe_risks():
             "jailbreak",
         ]
     ]
+
 
 def generate_policy_manifest(
     use_case: str,
@@ -87,7 +89,7 @@ def generate_policy_manifest(
                     name=risk.name,
                     description=description,
                     guardian_prompt=guardian_prompt,
-                    source = NexusRiskSource.AI_ATLAS_NEXUS,
+                    source=NexusRiskSource.AI_ATLAS_NEXUS,
                     is_native=is_native,
                     taxonomy=risk.isDefinedByTaxonomy,
                 )
@@ -98,7 +100,7 @@ def generate_policy_manifest(
                     name=risk.name,
                     description=description,
                     guardian_prompt=guardian_prompt,
-                    source = NexusRiskSource.AI_ATLAS_NEXUS,
+                    source=NexusRiskSource.AI_ATLAS_NEXUS,
                     is_native=False,
                     taxonomy=risk.isDefinedByTaxonomy,
                 )

@@ -152,7 +152,7 @@ def _call_guardian(
                         0
                     ].prediction
                     label = _parse_guardian_score(raw_prediction)
-                except:
+                except Exception as e:
                     LOGGER.warning("Guardian call failed for risk=%s: %s", risk_name, e)
                     label = GuardianScore.ERROR
                     raw_prediction = ""
@@ -393,7 +393,7 @@ class GuardianAuditPlugin(
         latency = payload.execution_time_ms
 
         LOGGER.info(
-            f"[guardian-post-tool] {tool_name} — {'error' if not payload.success else str(len(tool_output))+" bytes"}, {latency}ms"
+            f"[guardian-post-tool] {tool_name} — {'error' if not payload.success else str(len(tool_output)) + " bytes"}, {latency}ms"
         )
 
         if not (not tool_output or not payload.success):
