@@ -131,7 +131,9 @@ def _call_guardian(
 
     # Create Guardian Verdict
     verdicts = []
-    for risk_name, raw_prediction in zip(risk_names, raw_predictions):
+    for risk_name, messages, raw_prediction in zip(
+        risk_names, all_messages, raw_predictions
+    ):
         label = _parse_guardian_score(raw_prediction)
 
         # retry failed guardian call
@@ -139,10 +141,10 @@ def _call_guardian(
             attempt = 1
             while attempt <= GUARDIAN_RETRY_ATTEMPTS:
                 LOGGER.warning(
-                    f"Retrying failed guardian assessment...attempt: {attempt}"
+                    f"Retrying failed guardian assessment - {risk_name}...attempt: {attempt}"
                 )
                 console.print(
-                    f"[white]risk={messages[0]['content']}\n  label={label}\n  preview={assistant_text.replace("\n", " ")[0:90] if assistant_text else input_text.replace("\n", " ")[0:90]}[/]"
+                    f"[white]  risk={messages[0]['content']}\n  label={label}\n  preview={assistant_text.replace("\n", " ")[0:90] if assistant_text else input_text.replace("\n", " ")[0:90]}[/]"
                 )
 
                 try:
