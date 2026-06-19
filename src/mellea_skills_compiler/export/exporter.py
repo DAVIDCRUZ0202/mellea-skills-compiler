@@ -377,7 +377,7 @@ def _build_reverse_manifest(plan: TranslationPlan, loaded: LoadedContext) -> dic
         "source_manifest": loaded.manifest,
         "warnings": plan.warnings + loaded.load_warnings,
         "policy_manifest_bundled": loaded.policy_manifest_path is not None,
-        "guardian_configured": False,
+        "guardian_configured": "audit" if loaded.policy_manifest_path is not None else False,
     }
 
 
@@ -426,6 +426,19 @@ def _build_export_notes(plan: TranslationPlan, loaded: LoadedContext) -> str:
         next_steps = [
             "1. Install dependencies: `pip install -e .`",
             "2. Consult the generated README.md for invocation instructions.",
+        ]
+    if loaded.policy_manifest_path is not None:
+        lines += [
+            "## Guardian audit",
+            "",
+            "This bundle was exported from a certified skill. Guardian audit-mode is active.",
+            "",
+            "- **Audit log**: `<bundle_dir>/audit/runtime_audit.jsonl`",
+            "- **Write access**: the process running the entry point must have write permission to the"
+            " `audit/` directory adjacent to the bundle. Create it if it does not exist:",
+            "  `mkdir -p <bundle_dir>/audit`",
+            "- To suppress Guardian at runtime, remove `policy_manifest.json` from the bundle directory.",
+            "",
         ]
     lines += ["## Next steps", ""] + next_steps
     return "\n".join(lines) + "\n"

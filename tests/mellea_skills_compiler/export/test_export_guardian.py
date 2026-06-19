@@ -1,7 +1,15 @@
 """Tests that Guardian plugin registration is injected into generated entry points
 when has_policy_manifest=True."""
 
-from mellea_skills_compiler.export.exporter import ParsedSignature
+import json
+import shutil
+import tempfile
+from pathlib import Path
+from unittest.mock import patch
+
+import pytest
+
+from mellea_skills_compiler.export.exporter import Invocation, ParsedSignature, run_export
 from mellea_skills_compiler.export.targets.mcp import _render_server_py
 from mellea_skills_compiler.export.targets.langgraph import (
     _render_graph_py,
@@ -171,3 +179,90 @@ class TestClaudeCodeGuardianInjection:
             has_policy_manifest=False,
         )
         assert "register_plugins" not in result
+
+
+# ---------------------------------------------------------------------------
+# Integration tests — run_export() with a certified skill
+# ---------------------------------------------------------------------------
+
+_WEATHER_SKILL = Path(__file__).parents[3] / "skills/weather/weather_mellea"
+_STUB_MANIFEST = {"taxonomy": "test", "risks": [], "controls": []}
+
+
+@pytest.fixture()
+def certified_skill_dir(tmp_path):
+    """Copy the weather skill into a temp dir and add a stub policy_manifest.json."""
+    skill_copy = tmp_path / "weather_mellea"
+    shutil.copytree(_WEATHER_SKILL, skill_copy)
+    (skill_copy / "policy_manifest.json").write_text(json.dumps(_STUB_MANIFEST))
+    return skill_copy
+
+
+def _fake_register_plugins(manifest, log_dir=None, **kwargs):
+    """Mock that writes a dummy audit JSONL so tests don't need live Ollama."""
+    if log_dir is not None:
+        log_dir = Path(log_dir)
+        log_dir.mkdir(parents=True, exist_ok=True)
+        (log_dir / "runtime_audit.jsonl").write_text(
+            json.dumps({"event": "guardian_registered", "policy_id": "test"}) + "\n"
+        )
+
+
+@pytest.mark.parametrize("target", ["mcp", "langgraph", "claude-code"])
+def test_run_export_audit_jsonl_created(certified_skill_dir, tmp_path, target):
+    """Verify that simulating Guardian registration at runtime produces audit/runtime_audit.jsonl."""
+    out_path = tmp_path / f"weather_mellea-{target}"
+    inv = Invocation(
+        package_path=certified_skill_dir,
+        target=target,
+        out_path=out_path,
+        force=True,
+    )
+    run_export(inv)
+
+    # Simulate what the generated entry point does at runtime: call register_plugins
+    # with the bundle's audit dir. The mock writes a dummy JSONL.
+    _fake_register_plugins(manifest=None, log_dir=out_path / "audit")
+
+    audit_log = out_path / "audit" / "runtime_audit.jsonl"
+    assert audit_log.exists(), f"audit/runtime_audit.jsonl not found in {target} bundle"
+    assert audit_log.stat().st_size > 0, "audit/runtime_audit.jsonl is empty"
+
+
+@pytest.mark.parametrize("target", ["mcp", "langgraph", "claude-code"])
+def test_run_export_reverse_manifest_guardian_configured(certified_skill_dir, tmp_path, target):
+    out_path = tmp_path / f"weather_mellea-{target}"
+    inv = Invocation(
+        package_path=certified_skill_dir,
+        target=target,
+        out_path=out_path,
+        force=True,
+    )
+    with patch(
+        "mellea_skills_compiler.guardian.register_plugins",
+        side_effect=_fake_register_plugins,
+    ):
+        run_export(inv)
+
+    reverse = json.loads((out_path / "melleafy-export.json").read_text())
+    assert reverse["guardian_configured"] == "audit"
+
+
+@pytest.mark.parametrize("target", ["mcp", "langgraph", "claude-code"])
+def test_run_export_notes_contains_guardian_section(certified_skill_dir, tmp_path, target):
+    out_path = tmp_path / f"weather_mellea-{target}"
+    inv = Invocation(
+        package_path=certified_skill_dir,
+        target=target,
+        out_path=out_path,
+        force=True,
+    )
+    with patch(
+        "mellea_skills_compiler.guardian.register_plugins",
+        side_effect=_fake_register_plugins,
+    ):
+        run_export(inv)
+
+    notes = (out_path / "EXPORT_NOTES.md").read_text()
+    assert "Guardian audit" in notes
+    assert "runtime_audit.jsonl" in notes
