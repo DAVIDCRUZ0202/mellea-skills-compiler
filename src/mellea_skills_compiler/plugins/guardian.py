@@ -35,8 +35,8 @@ from mellea.stdlib.components.instruction import Instruction
 from rich.console import Console
 
 from mellea_skills_compiler.enums import (
-    GovernanceTaxonomy,
     GuardianMode,
+    GuardianScore,
     InferenceEngineType,
 )
 from mellea_skills_compiler.inference import InferenceService
@@ -47,6 +47,7 @@ from mellea_skills_compiler.toolkit.logging import configure_logger
 
 LOGGER = configure_logger()
 console = Console()
+GUARDIAN_RETRY_ATTEMPTS = 2
 
 
 def _parse_guardian_score(text: str) -> str:
@@ -55,10 +56,10 @@ def _parse_guardian_score(text: str) -> str:
     if "<score>" in s and "</score>" in s:
         score = s.split("<score>")[1].split("</score>")[0].strip()
         if score == "yes":
-            return "Yes"
+            return GuardianScore.YES
         if score == "no":
-            return "No"
-    return "Failed"
+            return GuardianScore.NO
+    return GuardianScore.FAILED
 
 
 def _call_guardian(
@@ -91,9 +92,12 @@ def _call_guardian(
     ``<score>no</score>`` (safe).
     """
 
-    all_messages = []
-    guardian_prompts = [r.guardian_prompt for r in risks]
+    # Extract risk names and their prompts
     risk_names = [r.name for r in risks]
+    guardian_prompts = [r.guardian_prompt for r in risks]
+
+    # Create guardian message prompts
+    all_messages = []
     for guardian_prompt in guardian_prompts:
         messages = [{"role": "system", "content": guardian_prompt}]
         if input_text:
@@ -103,28 +107,64 @@ def _call_guardian(
         all_messages.append(messages)
 
     try:
-        guardian = InferenceService(inference_engine).guardian(
-            guardian_model, parameters={"temperature": 0, "num_ctx": 8192}
+        # Load inference model
+        guardian_model = InferenceService(inference_engine).guardian(
+            guardian_model, parameters={"temperature": 0}
         )
-        raw_predictions = guardian.chat(all_messages, verbose=False)
-        labels = [
-            _parse_guardian_score(raw_prediction.prediction)
-            for raw_prediction in raw_predictions
+
+        # Batch inferencing guardian risks
+        raw_predictions = [
+            raw_prediction.prediction
+            for raw_prediction in guardian_model.chat(all_messages, verbose=False)
         ]
-        verdicts = [
-            GuardianVerdict(
-                risk=risk_name, label=label, raw_output=raw_prediction.prediction
-            )
-            for risk_name, label, raw_prediction in zip(
-                risk_names,
-                labels,
-                raw_predictions,
-            )
-        ]
-        return verdicts
-    except (urllib.error.URLError, urllib.error.HTTPError, KeyError) as e:
+
+    except Exception as e:
         LOGGER.warning("Guardian call failed for risks=%s: %s", risk_names, e)
-        return []
+        return [
+            GuardianVerdict(
+                risk=risk.name,
+                label=GuardianScore.ERROR,
+                raw_output="",
+            )
+            for risk in risks
+        ]
+
+    # Create Guardian Verdict
+    verdicts = []
+    for risk_name, raw_prediction in zip(risk_names, raw_predictions):
+        label = _parse_guardian_score(raw_prediction)
+
+        # retry failed guardian call
+        if label == GuardianScore.FAILED:
+            attempt = 1
+            while attempt <= GUARDIAN_RETRY_ATTEMPTS:
+                LOGGER.warning(
+                    f"Retrying failed guardian assessment...attempt: {attempt}"
+                )
+                console.print(
+                    f"[white]risk={messages[0]['content']}\n  label={label}\n  preview={assistant_text.replace("\n", " ")[0:90] if assistant_text else input_text.replace("\n", " ")[0:90]}[/]"
+                )
+
+                try:
+                    raw_prediction = guardian_model.chat([messages], verbose=False)[
+                        0
+                    ].prediction
+                    label = _parse_guardian_score(raw_prediction)
+                except:
+                    LOGGER.warning("Guardian call failed for risk=%s: %s", risk_name, e)
+                    label = GuardianScore.ERROR
+                    raw_prediction = ""
+
+                if label not in [GuardianScore.FAILED, GuardianScore.ERROR]:
+                    break
+
+                attempt += 1
+
+        verdicts.append(
+            GuardianVerdict(risk=risk_name, label=label, raw_output=raw_prediction)
+        )
+
+    return verdicts
 
 
 def _run_guardian_post_checks(
@@ -273,9 +313,17 @@ class GuardianPlugin(BasePlugin):
     def summary(self) -> dict:
         return {
             "all_verdicts": self.all_verdicts,
-            "flagged_verdicts": [v for v in self.all_verdicts if v.label == "Yes"],
-            "passed_verdicts": [v for v in self.all_verdicts if v.label == "No"],
-            "failed_verdicts": [v for v in self.all_verdicts if v.label == "Failed"],
+            "flagged_verdicts": [
+                v for v in self.all_verdicts if v.label == GuardianScore.YES
+            ],
+            "passed_verdicts": [
+                v for v in self.all_verdicts if v.label == GuardianScore.NO
+            ],
+            "failed_verdicts": [
+                v
+                for v in self.all_verdicts
+                if v.label in [GuardianScore.FAILED, GuardianScore.ERROR]
+            ],
         }
 
 
@@ -364,7 +412,7 @@ class GuardianAuditPlugin(
             )
             self.all_verdicts.extend(verdicts)
 
-            flagged = [v.risk for v in verdicts if v.label == "Yes"]
+            flagged = [v.risk for v in verdicts if v.label == GuardianScore.YES]
             if flagged:
                 risk_list = ", ".join(flagged)
                 console.print()
@@ -402,16 +450,31 @@ class GuardianEnforcePlugin(
         )
         self.all_verdicts.extend(verdicts)
 
-        flagged = [v.risk for v in verdicts if v.label == "Yes"]
-        if flagged:
-            risk_list = ", ".join(flagged)
+        flagged = [v.risk for v in verdicts if v.label == GuardianScore.YES]
+        failed = [
+            v.risk
+            for v in verdicts
+            if v.label in [GuardianScore.ERROR, GuardianScore.FAILED]
+        ]
+        if failed:
             console.print()
             console.print(
-                f"[yellow]Plugin-\\[guardian-pre-enforce][/]\n  BLOCKING INPUT — risks flagged: {risk_list}"
+                f"[yellow]Plugin-\\[guardian-pre-enforce][/]\n  BLOCKING INPUT — risks assessment failed for {failed}"
             )
             console.print()
             return block(
-                reason=f"Guardian detected input risks: {risk_list}",
+                reason=f"Guardian input risks assessment failed for {failed}",
+                code="guardian_input_risk_failure",
+                details={"failed_risks": failed, "stage": "pre_generation"},
+            )
+        elif flagged:
+            console.print()
+            console.print(
+                f"[yellow]Plugin-\\[guardian-pre-enforce][/]\n  BLOCKING INPUT — risks flagged for {flagged}"
+            )
+            console.print()
+            return block(
+                reason=f"Guardian detected input risks for {flagged}",
                 code="guardian_input_risk_detected",
                 details={"flagged_risks": flagged, "stage": "pre_generation"},
             )
@@ -425,16 +488,31 @@ class GuardianEnforcePlugin(
         )
         self.all_verdicts.extend(verdicts)
 
-        flagged = [v.risk for v in verdicts if v.label == "Yes"]
-        if flagged:
-            risk_list = ", ".join(flagged)
+        flagged = [v.risk for v in verdicts if v.label == GuardianScore.YES]
+        failed = [
+            v.risk
+            for v in verdicts
+            if v.label in [GuardianScore.ERROR, GuardianScore.FAILED]
+        ]
+        if failed:
             console.print()
             console.print(
-                f"[yellow]Plugin-\\[guardian-post-enforce][/]\n  BLOCKING OUTPUT — risks flagged: {risk_list}"
+                f"[yellow]Plugin-\\[guardian-pre-enforce][/]\n  BLOCKING OUTPUT — risks assessment failed for {failed}"
             )
             console.print()
             return block(
-                reason=f"Guardian detected output risks - [{risk_list}]",
+                reason=f"Guardian output risks assessment failed for {failed}",
+                code="guardian_output_risk_failure",
+                details={"failed_risks": failed, "stage": "post_generation"},
+            )
+        elif flagged:
+            console.print()
+            console.print(
+                f"[yellow]Plugin-\\[guardian-post-enforce][/]\n  BLOCKING OUTPUT — risks flagged for {flagged}"
+            )
+            console.print()
+            return block(
+                reason=f"Guardian detected output risks for {flagged}",
                 code="guardian_output_risk_detected",
                 details={"flagged_risks": flagged, "stage": "post_generation"},
             )
@@ -475,8 +553,28 @@ class GuardianEnforcePlugin(
         )
         self.all_verdicts.extend(verdicts)
 
-        flagged = [v.risk for v in verdicts if v.label == "Yes"]
-        if flagged:
+        flagged = [v.risk for v in verdicts if v.label == GuardianScore.YES]
+        failed = [
+            v.risk
+            for v in verdicts
+            if v.label in [GuardianScore.ERROR, GuardianScore.FAILED]
+        ]
+        if failed:
+            risk_list = ", ".join(failed)
+            console.print(
+                f"[yellow]Plugin-\\[guardian-pre-enforce][/]\n  BLOCKING TOOL OUTPUT — risks failed: {risk_list}"
+            )
+            console.print()
+            return block(
+                reason=f"Guardian tool output risks assessment failed: {risk_list}",
+                code="guardian_tool_output_risk_failure",
+                details={
+                    "failed_risks": failed,
+                    "tool": tool_name,
+                    "stage": "post_tool",
+                },
+            )
+        elif flagged:
             risk_list = ", ".join(flagged)
             console.print()
             console.print(

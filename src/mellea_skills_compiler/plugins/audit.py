@@ -20,6 +20,7 @@ from typing import Any, Optional, Union
 
 from mellea.plugins import HookType, Plugin, PluginMode, hook
 
+from mellea_skills_compiler.enums import GuardianScore
 from mellea_skills_compiler.plugins import BasePlugin
 from mellea_skills_compiler.plugins.guardian import (
     GuardianAuditPlugin,
@@ -109,7 +110,13 @@ class AuditTrailPlugin(
                 "request_id": getattr(payload, "request_id", ""),
                 "component_type": type(payload.action).__name__,
                 "input_preview": input_preview,
-                "risk_detected": any(v.get("label") == "Yes" for v in verdicts),
+                "risk_detected": any(
+                    v.get("label") == GuardianScore.YES for v in verdicts
+                ),
+                "risk_failed": any(
+                    v.get("label") in [GuardianScore.FAILED, GuardianScore.ERROR]
+                    for v in verdicts
+                ),
                 "guardian_verdicts": verdicts,
                 "model_options": dict(getattr(payload, "model_options", {})),
             }
@@ -151,7 +158,13 @@ class AuditTrailPlugin(
                 "request_id": getattr(payload, "request_id", ""),
                 "output_preview": output_text,
                 "latency_ms": latency,
-                "risk_detected": any(v.get("label") == "Yes" for v in verdicts),
+                "risk_detected": any(
+                    v.get("label") == GuardianScore.YES for v in verdicts
+                ),
+                "risk_failed": any(
+                    v.get("label") in [GuardianScore.FAILED, GuardianScore.ERROR]
+                    for v in verdicts
+                ),
                 "guardian_verdicts": verdicts,
             }
         )
@@ -188,7 +201,6 @@ class AuditTrailPlugin(
                 "error": str(getattr(payload, "error", "")),
             }
         )
-
 
     # ── Validation hooks ────────────────────────────────────────────
     @hook(HookType.VALIDATION_POST_CHECK, mode=PluginMode.FIRE_AND_FORGET)
@@ -245,19 +257,24 @@ class AuditTrailPlugin(
                 ]
             )
 
-        any_risk = any(v.get("label") == "Yes" for v in verdicts)
         self._write(
             {
                 "hook": "tool_post_invoke",
                 "session_id": getattr(payload, "session_id", ""),
                 "tool_name": tool_name,
                 "tool_args": str(getattr(tool_call, "args", {})),
-                "output_preview": tool_output[:300],
+                "output_preview": tool_output,
                 "execution_time_ms": payload.execution_time_ms,
                 "success": payload.success,
                 "error": str(payload.error) if payload.error else "",
                 "guardian_verdicts": verdicts,
-                "risk_detected": any_risk,
+                "risk_detected": any(
+                    v.get("label") == GuardianScore.YES for v in verdicts
+                ),
+                "risk_failed": any(
+                    v.get("label") in [GuardianScore.FAILED, GuardianScore.ERROR]
+                    for v in verdicts
+                ),
                 "governance": "pattern3_llm_directed",
             }
         )
@@ -266,15 +283,19 @@ class AuditTrailPlugin(
     def summary(self) -> dict:
         """Return a summary of the audit trail for display."""
         total = len(self._entries)
-        generations = [e for e in self._entries if e["hook"] == "generation_post_call"]
-        tool_calls = [e for e in self._entries if e["hook"] == "tool_post_invoke"]
-        gen_risks = [e for e in generations if e.get("risk_detected")]
+        generations = [e for e in self._entries if e["hook"].startswith("generation")]
+        tool_calls = [e for e in self._entries if e["hook"].startswith("tool")]
+        gen_risks_flagged = [e for e in generations if e.get("risk_detected")]
+        gen_risks_failed = [e for e in generations if e.get("risk_failed")]
         tool_risks = [e for e in tool_calls if e.get("risk_detected")]
+        tool_risks_failed = [e for e in tool_calls if e.get("risk_failed")]
         return {
             "total_events": total,
             "generations": len(generations),
             "tool_calls": len(tool_calls),
-            "generation_risks_flagged": len(gen_risks),
+            "generation_risks_flagged": len(gen_risks_flagged),
+            "generation_risks_failed": len(gen_risks_failed),
             "tool_risks_flagged": len(tool_risks),
+            "tool_risks_failed": len(tool_risks_failed),
             "log_file": str(self.log_path),
         }

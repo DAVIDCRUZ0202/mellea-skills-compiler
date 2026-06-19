@@ -143,7 +143,7 @@ class GuardianVerdict:
     """Result of a single Guardian risk check."""
 
     risk: str
-    label: str  # "Yes" (risk detected), "No" (safe), "Failed"
+    label: str  # "Yes" (risk detected), "No" (safe), "Failed", "Error"
     raw_output: str
     timestamp: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
 

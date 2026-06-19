@@ -35,6 +35,7 @@ from mellea_skills_compiler.certification.report import (
 )
 from mellea_skills_compiler.enums import (
     GuardianMode,
+    GuardianScore,
     InferenceEngineType,
     NexusRiskSource,
     SpecFileFormat,
@@ -371,7 +372,7 @@ def full_pipeline(
 
     audit_summary = audit_plugin.summary()
     for k, v in audit_summary.items():
-        LOGGER.info("  %s: %s", k, v)
+        LOGGER.info("  %s: %s", k.replace("_", " ").title(), v)
 
     # ── Step 7: Compliance classification ─────────────────────────────
     LOGGER.info("")
@@ -409,7 +410,6 @@ def full_pipeline(
 
     # ── Final summary ─────────────────────────────────────────────────
     print("")
-    any_risk = any(v.label == "Yes" for v in guardian_plugin.all_verdicts)
     LOGGER.info("=" * 70)
     skill_name = frontmatter.get("name", "unknown")
     LOGGER.info(f"COMPLETE — {skill_name} [{guardian_mode} mode]")
@@ -419,9 +419,11 @@ def full_pipeline(
     LOGGER.info("  Fixture: %s", fixture["id"])
     LOGGER.info("  Guardian risks: %d (from Nexus)", len(manifest.risks))
     LOGGER.info(
-        "  Guardian verdicts: %d total, %d flagged",
+        "  Guardian verdicts: %d total, %d Passed, %d flagged, %d failed",
         len(verdict_summary["all_verdicts"]),
+        len(verdict_summary["passed_verdicts"]),
         len(verdict_summary["flagged_verdicts"]),
+        len(verdict_summary["failed_verdicts"]),
     )
     LOGGER.info("  Audit events: %d", len(audit_entries))
     LOGGER.info(
@@ -440,12 +442,21 @@ def full_pipeline(
     LOGGER.info("")
 
     if all(risk.source == NexusRiskSource.DEFAULT_FALLBACK for risk in manifest.risks):
-        LOGGER.warning(f" This certification report is based on generic fail-safe risk screening - {[risk.name for risk in manifest.risks]}. The risks identified are not specific to the intended use-case.")
+        LOGGER.warning(
+            f" This certification report is based on generic fail-safe risk screening - {[risk.name for risk in manifest.risks]}. The risks identified are not specific to the intended use-case."
+        )
         LOGGER.info("")
 
-    if any_risk:
+    if verdict_summary["flagged_verdicts"]:
         LOGGER.warning("  STATUS: RISKS DETECTED — review audit trail")
-    else:
+    if verdict_summary["failed_verdicts"]:
+        LOGGER.warning(
+            "  STATUS: RISKS ASSESSMENT FAILURE DETECTED — review audit trail"
+        )
+    if (
+        not verdict_summary["flagged_verdicts"]
+        and not verdict_summary["failed_verdicts"]
+    ):
         LOGGER.info("  STATUS: ALL CHECKS PASSED")
 
     # Return RunResult with the summary of the run

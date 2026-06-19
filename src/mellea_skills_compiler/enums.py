@@ -68,3 +68,10 @@ class GuardianMode(Enum):
 class NexusRiskSource(StrEnum):
     DEFAULT_FALLBACK = "default-fallback"
     AI_ATLAS_NEXUS = "ai-atlas-nexus"
+
+
+class GuardianScore(StrEnum):
+    YES = "Yes"
+    NO = "No"
+    FAILED = "Failed"
+    ERROR = "Error"
