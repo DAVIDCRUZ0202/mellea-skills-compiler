@@ -114,7 +114,7 @@ def run_pipeline(
 
     # Create the current run directory
     run_dir = (
-        pipeline_dir.parent / "runs" / f"{datetime.now().strftime("%d-%m-%Y_%H:%M:%S")}"
+        pipeline_dir.parent / "runs" / f"{datetime.now().strftime("%d-%m-%Y_%H-%M-%S")}"
     )
     run_dir.mkdir(parents=True, exist_ok=True)
 
@@ -249,7 +249,7 @@ def full_pipeline(
 
     # Certification artifacts go into the skill's audit/ directory
     output_dir = (
-        pipeline_dir.parent / f"audit_{datetime.now().strftime("%d-%m-%Y_%H:%M:%S")}"
+        pipeline_dir.parent / f"audit_{datetime.now().strftime("%d-%m-%Y_%H-%M-%S")}"
     )
     output_dir.mkdir(exist_ok=True)
 
