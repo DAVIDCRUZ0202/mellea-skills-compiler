@@ -112,6 +112,12 @@ def run_pipeline(
     # Get guardian mode - AUDIT or ENFORCE
     guardian_mode = GuardianMode("enforce" if enforce else "audit")
 
+    # Create the current run directory
+    run_dir = (
+        pipeline_dir.parent / "runs" / f"{datetime.now().strftime("%d-%m-%Y_%H:%M:%S")}"
+    )
+    run_dir.mkdir(parents=True, exist_ok=True)
+
     if no_guardian:
         LOGGER.info("Guardian checks disabled (--no-guardian)")
     else:
@@ -140,13 +146,8 @@ def run_pipeline(
                     guardian_mode, manifest
                 )
                 guardian_plugin.register()
-                output_dir = (
-                    pipeline_dir.parent
-                    / f"audit_{datetime.now().strftime("%d-%m-%Y_%H:%M:%S")}"
-                )
-                output_dir.mkdir(exist_ok=True)
                 audit_plugin = AuditTrailPlugin(
-                    log_path=output_dir / "audit_trail.jsonl",
+                    log_path=run_dir / "audit_trail.jsonl",
                     guardian_plugin=guardian_plugin,
                 )
                 audit_plugin.register()
@@ -176,14 +177,21 @@ def run_pipeline(
         console.print("\n[bold blue]OUTPUT:[/]")
         print(output)
 
-        # Return RunResult with the summary of the run
-        return RunResult(
+        run_result = RunResult(
             guardian_mode=guardian_mode,
             guardian_verdict=guardian_plugin.summary() if guardian_plugin else None,
             fixture_summary={"name": fixture, "output": output},
             audit_summary=audit_plugin.summary() if audit_plugin else None,
-            guardian_audit_dir=output_dir if audit_plugin else None,
         )
+
+        # 2. Write RunResult to the JSON file
+        with open(
+            run_dir / "run_result.json", "w", encoding="utf-8"
+        ) as run_result_file:
+            json.dump(run_result.dump(), run_result_file, indent=4, sort_keys=True)
+
+        # Return RunResult with the summary of the run
+        return run_result
 
     except Exception as e:
         LOGGER.error(f"Pipeline run failed: {str(e)}")

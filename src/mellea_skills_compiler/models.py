@@ -3,7 +3,7 @@ import logging
 from collections import Counter
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
-from typing import Any, Dict, List, Union
+from typing import Any, Dict, List, Optional, Union
 
 from mellea_skills_compiler.enums import CoverageLevel, GovernanceTaxonomy, GuardianMode
 from mellea_skills_compiler.toolkit.logging import configure_logger
@@ -154,4 +154,7 @@ class RunResult:
     guardian_verdict: Dict[str, List[GuardianVerdict]]
     fixture_summary: Dict[str, Any]
     audit_summary: Dict[str, Any]
-    guardian_audit_dir: str
+    guardian_audit_dir: Optional[str] = None
+
+    def dump(self):
+        return asdict(self)
