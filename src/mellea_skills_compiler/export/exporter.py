@@ -399,35 +399,44 @@ def _build_export_notes(plan: TranslationPlan, loaded: LoadedContext) -> str:
             lines.append(f"- {w}")
         lines.append("")
     if plan.deployment_guidance:
-        lines += ["## Deployment guidance", "", plan.deployment_guidance, ""]
+        guidance = plan.deployment_guidance
+        if loaded.policy_manifest_path is not None:
+            guidance = "Install `mellea-skills-compiler` before running: `pip install mellea-skills-compiler`. " + guidance
+        lines += ["## Deployment guidance", "", guidance, ""]
     target = loaded.invocation.target
+    guardian = loaded.policy_manifest_path is not None
+    install_step = (
+        "Install dependencies: `pip install -e . && pip install mellea-skills-compiler`"
+        if guardian else
+        "Install dependencies: `pip install -e .`"
+    )
     if target == "langgraph":
         next_steps = [
             "1. Review `graph.py` — the generated node calls `run_pipeline` directly.",
-            "2. Install dependencies: `pip install -e .`",
+            f"2. {install_step}",
             "3. Invoke: `python -c \"from graph import graph; print(graph.invoke({'input': {}})['output'])\"`",
             "4. For LangGraph Platform: deploy using `langgraph.json`.",
         ]
     elif target == "mcp":
         next_steps = [
             "1. Review `server.py` — the generated tool wraps `run_pipeline`.",
-            "2. Install dependencies: `pip install -e .`",
+            f"2. {install_step}",
             "3. Register with an MCP client using `mcp.json`.",
             "4. Invoke via the MCP client or: `python server.py`.",
         ]
     elif target == "claude-code":
         next_steps = [
             "1. Review `scripts/run.sh` — the generated script calls `run_pipeline`.",
-            "2. Install dependencies: `pip install -e .`",
+            f"2. {install_step}",
             "3. Make executable: `chmod +x scripts/run.sh`",
             "4. Register under `.claude/skills/` and invoke via `bash scripts/run.sh <args>`.",
         ]
     else:
         next_steps = [
-            "1. Install dependencies: `pip install -e .`",
+            f"1. {install_step}",
             "2. Consult the generated README.md for invocation instructions.",
         ]
-    if loaded.policy_manifest_path is not None:
+    if guardian:
         lines += [
             "## Guardian audit",
             "",

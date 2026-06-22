@@ -89,6 +89,7 @@ def translate_langgraph(loaded: "LoadedContext") -> "TranslationPlan":
         sig=sig,
         env_vars=env_vars,
         modality=modality,
+        has_policy_manifest=loaded.policy_manifest_path is not None,
     )
 
     adapter_files: list["AdapterFile"] = [
@@ -616,7 +617,8 @@ _MODALITY_INVOCATION = {
 
 
 def _render_readme(
-    *, graph_name: str, sig: "ParsedSignature", env_vars: list[str], modality: str
+    *, graph_name: str, sig: "ParsedSignature", env_vars: list[str], modality: str,
+    has_policy_manifest: bool = False,
 ) -> str:
     example_input = _build_example_input(sig)
     invocation = _MODALITY_INVOCATION.get(modality, _MODALITY_INVOCATION["synchronous_oneshot"])
@@ -627,10 +629,30 @@ def _render_readme(
         env_lines = "\n".join(f"{v}=your_{v.lower()}_here" for v in env_vars)
         env_section = f"\n## Environment variables\n\nCreate `.env`:\n\n```\n{env_lines}\n```\n"
 
+    install_cmd = (
+        "pip install -e .\npip install mellea-skills-compiler"
+        if has_policy_manifest else
+        "pip install -e ."
+    )
+
+    guardian_section = ""
+    if has_policy_manifest:
+        guardian_section = (
+            "\n## Guardian audit\n\n"
+            "This bundle was exported from a certified skill. Guardian audit-mode is active at runtime.\n\n"
+            "The audit log is written to `audit/runtime_audit.jsonl` in this directory. "
+            "Ensure the process has write access:\n\n"
+            "```bash\n"
+            "mkdir -p audit\n"
+            "```\n\n"
+            "To suppress Guardian at runtime, remove `policy_manifest.json` from this directory.\n"
+        )
+
     return (
         f"# {graph_name} — LangGraph Adapter ({modality})\n\n"
         f"Exported LangGraph adapter for the `{graph_name}` Mellea pipeline.\n\n"
-        f"## Installation\n\n```bash\npip install -e .\n```\n"
+        f"## Installation\n\n```bash\n{install_cmd}\n```\n"
+        f"{guardian_section}"
         f"{env_section}\n"
         f"## Invocation\n\n```python\nfrom graph import graph\n\n{invocation}\n```\n\n"
         f"## LangGraph Platform\n\nDeploy using `langgraph.json` with the LangGraph CLI or Platform UI.\n"

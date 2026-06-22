@@ -75,6 +75,7 @@ def translate_mcp(loaded: "LoadedContext") -> "TranslationPlan":
         sig=sig,
         declared_env_vars=manifest.get("declared_env_vars", []),
         is_streaming=is_async,
+        has_policy_manifest=loaded.policy_manifest_path is not None,
     )
 
     if is_async:
@@ -358,8 +359,28 @@ def _render_readme(
     sig: "ParsedSignature",
     declared_env_vars: list,
     is_streaming: bool,
+    has_policy_manifest: bool = False,
 ) -> str:
     display_name = tool_name.replace("_", " ").title()
+
+    install_cmd = (
+        "pip install -e .\npip install mellea-skills-compiler"
+        if has_policy_manifest else
+        "pip install -e ."
+    )
+
+    guardian_section = ""
+    if has_policy_manifest:
+        guardian_section = (
+            "\n## Guardian audit\n\n"
+            "This bundle was exported from a certified skill. Guardian audit-mode is active at runtime.\n\n"
+            "The audit log is written to `audit/runtime_audit.jsonl` in this directory. "
+            "Ensure the process has write access:\n\n"
+            "```bash\n"
+            "mkdir -p audit\n"
+            "```\n\n"
+            "To suppress Guardian at runtime, remove `policy_manifest.json` from this directory.\n"
+        )
 
     env_section = ""
     if declared_env_vars:
@@ -403,8 +424,9 @@ def _render_readme(
         f"## Installation\n"
         f"\n"
         f"```bash\n"
-        f"pip install -e .\n"
+        f"{install_cmd}\n"
         f"```\n"
+        f"{guardian_section}"
         f"{env_section}"
         f"\n"
         f"## Running the server\n"

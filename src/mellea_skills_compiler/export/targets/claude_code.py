@@ -74,6 +74,7 @@ def translate_claude_code(loaded: "LoadedContext") -> "TranslationPlan":
         package_name=package_name,
         modality=modality,
         sig=sig,
+        has_policy_manifest=loaded.policy_manifest_path is not None,
     )
 
     adapter_files: list["AdapterFile"] = [
@@ -447,12 +448,32 @@ def _render_readme(
     package_name: str,
     modality: str,
     sig: "ParsedSignature",
+    has_policy_manifest: bool = False,
 ) -> str:
     display_name = skill_name.replace("_", " ").title()
     modality_note = _MODALITY_NOTES.get(modality, _MODALITY_NOTES["synchronous_oneshot"])
     invocation_example = _MODALITY_INVOCATION_EXAMPLE.get(
         modality, _MODALITY_INVOCATION_EXAMPLE["synchronous_oneshot"]
     )
+
+    install_cmd = (
+        "pip install -e .\npip install mellea-skills-compiler"
+        if has_policy_manifest else
+        "pip install -e ."
+    )
+
+    guardian_section = ""
+    if has_policy_manifest:
+        guardian_section = (
+            "\n## Guardian audit\n\n"
+            "This bundle was exported from a certified skill. Guardian audit-mode is active at runtime.\n\n"
+            "The audit log is written to `audit/runtime_audit.jsonl` in this directory. "
+            "Ensure the process has write access:\n\n"
+            "```bash\n"
+            "mkdir -p audit\n"
+            "```\n\n"
+            "To suppress Guardian at runtime, remove `policy_manifest.json` from this directory.\n"
+        )
 
     return (
         f"# {display_name} — Claude Code Adapter\n"
@@ -462,8 +483,9 @@ def _render_readme(
         f"## Installation\n"
         f"\n"
         f"```bash\n"
-        f"pip install -e .\n"
+        f"{install_cmd}\n"
         f"```\n"
+        f"{guardian_section}"
         f"\n"
         f"## Registration\n"
         f"\n"
