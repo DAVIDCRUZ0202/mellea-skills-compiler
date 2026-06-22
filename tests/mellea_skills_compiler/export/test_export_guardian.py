@@ -186,7 +186,7 @@ class TestClaudeCodeGuardianInjection:
 # ---------------------------------------------------------------------------
 
 _WEATHER_SKILL = Path(__file__).parents[3] / "skills/weather/weather_mellea"
-_STUB_MANIFEST = {"taxonomy": "test", "risks": [], "controls": []}
+_STUB_MANIFEST = {"use_case": "test", "taxonomy": "test", "risks": [], "additional_risks": []}
 
 
 @pytest.fixture()
