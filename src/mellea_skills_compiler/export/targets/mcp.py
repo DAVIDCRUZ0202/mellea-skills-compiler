@@ -66,6 +66,7 @@ def translate_mcp(loaded: "LoadedContext") -> "TranslationPlan":
     pyproject_toml = _render_pyproject_toml(
         tool_name=tool_name,
         package_name=package_name,
+        has_policy_manifest=loaded.policy_manifest_path is not None,
     )
 
     readme = _render_readme(
@@ -105,6 +106,7 @@ def translate_mcp(loaded: "LoadedContext") -> "TranslationPlan":
 # ---------------------------------------------------------------------------
 # Field resolution
 # ---------------------------------------------------------------------------
+
 
 def _resolve_tool_name(manifest: dict, package_name: str) -> str:
     """Derive tool name: runtime_metadata identity name → package_name (sanitized)."""
@@ -193,6 +195,7 @@ def _map_type(t: str) -> str:
 # server.py
 # ---------------------------------------------------------------------------
 
+
 def _render_server_py(
     *,
     package_name: str,
@@ -211,12 +214,11 @@ def _render_server_py(
 
     env_note = ""
     if declared_env_vars:
-        var_names = [v if isinstance(v, str) else v.get("name", str(v)) for v in declared_env_vars]
-        env_note = (
-            "\n# Required environment variables: "
-            + ", ".join(var_names)
-            + "\n"
-        )
+        var_names = [
+            v if isinstance(v, str) else v.get("name", str(v))
+            for v in declared_env_vars
+        ]
+        env_note = "\n# Required environment variables: " + ", ".join(var_names) + "\n"
 
     guardian_block = ""
     if has_policy_manifest:
@@ -224,11 +226,14 @@ def _render_server_py(
             "from pathlib import Path\n"
             "from mellea_skills_compiler.models import PolicyManifest\n"
             "from mellea_skills_compiler.plugins.guardian import GuardianAuditPlugin\n"
+            "from mellea_skills_compiler.plugins.audit import AuditTrailPlugin\n"
             "\n"
             '_manifest_path = Path(__file__).parent / "policy_manifest.json"\n'
             "if _manifest_path.exists():\n"
             "    _manifest = PolicyManifest.from_json(str(_manifest_path))\n"
-            "    GuardianAuditPlugin(_manifest).register()\n"
+            "    guardian_plugin = GuardianAuditPlugin(_manifest)\n"
+            "    guardian_plugin.register()\n"
+            "    AuditTrailPlugin(log_path=Path('audit_trail.jsonl'), guardian_plugin=guardian_plugin).register()\n"
             "\n"
         )
 
@@ -240,7 +245,9 @@ def _render_server_py(
             f"    return ''.join(chunks)"
         )
     else:
-        result_expr = f"{entry_function}({passthrough})" if passthrough else f"{entry_function}()"
+        result_expr = (
+            f"{entry_function}({passthrough})" if passthrough else f"{entry_function}()"
+        )
         tool_body = (
             f"    result = {result_expr}\n"
             f"    if hasattr(result, 'model_dump'):\n"
@@ -277,6 +284,7 @@ def _render_server_py(
 # mcp.json
 # ---------------------------------------------------------------------------
 
+
 def _render_mcp_json(
     *,
     tool_name: str,
@@ -293,9 +301,7 @@ def _render_mcp_json(
 
     streaming_comment = ""
     if is_streaming:
-        streaming_comment = (
-            "Streaming modality: use the http transport entry for token-by-token streaming."
-        )
+        streaming_comment = "Streaming modality: use the http transport entry for token-by-token streaming."
 
     config: dict = {"mcpServers": {}}
 
@@ -323,7 +329,16 @@ def _render_mcp_json(
 # pyproject.toml
 # ---------------------------------------------------------------------------
 
-def _render_pyproject_toml(*, tool_name: str, package_name: str) -> str:
+
+def _render_pyproject_toml(
+    *, tool_name: str, package_name: str, has_policy_manifest: bool = False
+) -> str:
+    deps = ['    "mcp>=1.2.0",\n']
+    if has_policy_manifest:
+        deps.append(
+            '    "mellea-skills-compiler@git+https://github.com/generative-computing/mellea-skills-compiler.git",\n'
+        )
+
     return (
         "[build-system]\n"
         'requires = ["setuptools>=68"]\n'
@@ -334,9 +349,7 @@ def _render_pyproject_toml(*, tool_name: str, package_name: str) -> str:
         'version = "0.1.0"\n'
         f'description = "MCP server adapter for {tool_name}"\n'
         'requires-python = ">=3.11"\n'
-        "dependencies = [\n"
-        '    "mcp>=1.2.0",\n'
-        "]\n"
+        "dependencies = [\n" + "".join(deps) + "]\n"
         "\n"
         "[tool.setuptools.packages.find]\n"
         'where = ["."]\n'
@@ -351,6 +364,7 @@ def _render_pyproject_toml(*, tool_name: str, package_name: str) -> str:
 # README.md
 # ---------------------------------------------------------------------------
 
+
 def _render_readme(
     *,
     tool_name: str,
@@ -363,11 +377,7 @@ def _render_readme(
 ) -> str:
     display_name = tool_name.replace("_", " ").title()
 
-    install_cmd = (
-        "pip install -e .\npip install git+https://github.com/generative-computing/mellea-skills-compiler.git"
-        if has_policy_manifest else
-        "pip install -e ."
-    )
+    install_cmd = "pip install -e ."
 
     guardian_section = ""
     if has_policy_manifest:
@@ -384,7 +394,10 @@ def _render_readme(
 
     env_section = ""
     if declared_env_vars:
-        var_names = [v if isinstance(v, str) else v.get("name", str(v)) for v in declared_env_vars]
+        var_names = [
+            v if isinstance(v, str) else v.get("name", str(v))
+            for v in declared_env_vars
+        ]
         lines = "\n".join(f"export {v}=<value>" for v in var_names)
         env_section = (
             "\n## Environment variables\n\n"
@@ -448,14 +461,14 @@ def _render_readme(
         f"Add to your MCP client config (e.g. `~/.claude/claude_desktop_config.json`):\n"
         f"\n"
         f"```json\n"
-        f'{{\n'
+        f"{{\n"
         f'  "mcpServers": {{\n'
         f'    "{tool_name}": {{\n'
         f'      "command": "python",\n'
         f'      "args": ["/absolute/path/to/server.py"]\n'
-        f'    }}\n'
-        f'  }}\n'
-        f'}}\n'
+        f"    }}\n"
+        f"  }}\n"
+        f"}}\n"
         f"```\n"
         f"\n"
         f"See `mcp.json` for a full example including both stdio and http transport entries.\n"
@@ -476,6 +489,7 @@ def _render_readme(
 # ---------------------------------------------------------------------------
 # Deployment guidance (used in EXPORT_NOTES.md)
 # ---------------------------------------------------------------------------
+
 
 def _deployment_guidance(tool_name: str, is_streaming: bool) -> str:
     base = (
