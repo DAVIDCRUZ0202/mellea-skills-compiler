@@ -197,12 +197,11 @@ def _guardian_inline_snippet() -> str:
     return (
         "import os as _gos\n"
         "from pathlib import Path as _GPath\n"
-        "from mellea_skills_compiler.guardian import register_plugins as _reg\n"
-        "from mellea_skills_compiler.certification.nexus_policy import PolicyManifest as _PM\n"
+        "from mellea_skills_compiler.models import PolicyManifest as _PM\n"
+        "from mellea_skills_compiler.plugins.guardian import GuardianAuditPlugin as _GAP\n"
         '_gmp = _GPath(_gos.environ.get("ADAPTER_DIR", ".")) / "policy_manifest.json"\n'
         "if _gmp.exists():\n"
-        "    _gm = _PM.from_json(str(_gmp))\n"
-        '    _reg(_gm, log_dir=_GPath(_gos.environ.get("ADAPTER_DIR", ".")) / "audit")\n'
+        "    _GAP(_PM.from_json(str(_gmp))).register()\n"
     )
 
 

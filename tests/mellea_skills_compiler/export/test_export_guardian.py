@@ -43,7 +43,7 @@ class TestMcpGuardianInjection:
             declared_env_vars=[],
             has_policy_manifest=True,
         )
-        assert "register_plugins" in result
+        assert "GuardianAuditPlugin" in result
         assert "policy_manifest.json" in result
 
     def test_guardian_block_absent_without_manifest(self):
@@ -58,7 +58,7 @@ class TestMcpGuardianInjection:
             declared_env_vars=[],
             has_policy_manifest=False,
         )
-        assert "register_plugins" not in result
+        assert "GuardianAuditPlugin" not in result
         assert "PolicyManifest" not in result
 
     def test_guardian_block_before_fastmcp_instantiation(self):
@@ -73,7 +73,7 @@ class TestMcpGuardianInjection:
             declared_env_vars=[],
             has_policy_manifest=True,
         )
-        assert result.index("register_plugins") < result.index('mcp = FastMCP(')
+        assert result.index("GuardianAuditPlugin") < result.index('mcp = FastMCP(')
 
 
 class TestLangGraphGuardianInjection:
@@ -90,7 +90,7 @@ class TestLangGraphGuardianInjection:
             manifest={},
             has_policy_manifest=True,
         )
-        assert "register_plugins" in result
+        assert "GuardianAuditPlugin" in result
         assert "policy_manifest.json" in result
 
     def test_guardian_block_absent_without_manifest(self):
@@ -106,7 +106,7 @@ class TestLangGraphGuardianInjection:
             manifest={},
             has_policy_manifest=False,
         )
-        assert "register_plugins" not in result
+        assert "GuardianAuditPlugin" not in result
 
     def test_guardian_block_before_builder(self):
         result = _render_graph_py(
@@ -121,7 +121,7 @@ class TestLangGraphGuardianInjection:
             manifest={},
             has_policy_manifest=True,
         )
-        assert result.index("register_plugins") < result.index("_builder = StateGraph")
+        assert result.index("GuardianAuditPlugin") < result.index("_builder = StateGraph")
 
 
 class TestClaudeCodeGuardianInjection:
@@ -136,7 +136,7 @@ class TestClaudeCodeGuardianInjection:
             export_version="0.1.0",
             has_policy_manifest=True,
         )
-        assert "register_plugins" in result
+        assert "GuardianAuditPlugin" in result
         assert "policy_manifest.json" in result
 
     def test_guardian_snippet_present_streaming(self):
@@ -150,7 +150,7 @@ class TestClaudeCodeGuardianInjection:
             export_version="0.1.0",
             has_policy_manifest=True,
         )
-        assert "register_plugins" in result
+        assert "GuardianAuditPlugin" in result
         assert "policy_manifest.json" in result
 
     def test_guardian_snippet_present_conversational_session(self):
@@ -164,7 +164,7 @@ class TestClaudeCodeGuardianInjection:
             export_version="0.1.0",
             has_policy_manifest=True,
         )
-        assert "register_plugins" in result
+        assert "GuardianAuditPlugin" in result
         assert "policy_manifest.json" in result
 
     def test_guardian_snippet_absent_without_manifest(self):
@@ -178,7 +178,7 @@ class TestClaudeCodeGuardianInjection:
             export_version="0.1.0",
             has_policy_manifest=False,
         )
-        assert "register_plugins" not in result
+        assert "GuardianAuditPlugin" not in result
 
 
 # ---------------------------------------------------------------------------
@@ -198,16 +198,6 @@ def certified_skill_dir(tmp_path):
     return skill_copy
 
 
-def _fake_register_plugins(manifest, log_dir=None, **kwargs):
-    """Mock that writes a dummy audit JSONL so tests don't need live Ollama."""
-    if log_dir is not None:
-        log_dir = Path(log_dir)
-        log_dir.mkdir(parents=True, exist_ok=True)
-        (log_dir / "runtime_audit.jsonl").write_text(
-            json.dumps({"event": "guardian_registered", "policy_id": "test"}) + "\n"
-        )
-
-
 @pytest.mark.parametrize("target", ["mcp", "langgraph", "claude-code"])
 def test_run_export_audit_jsonl_created(certified_skill_dir, tmp_path, target):
     """Verify that simulating Guardian registration at runtime produces audit/runtime_audit.jsonl."""
@@ -220,9 +210,13 @@ def test_run_export_audit_jsonl_created(certified_skill_dir, tmp_path, target):
     )
     run_export(inv)
 
-    # Simulate what the generated entry point does at runtime: call register_plugins
-    # with the bundle's audit dir. The mock writes a dummy JSONL.
-    _fake_register_plugins(manifest=None, log_dir=out_path / "audit")
+    # Simulate what the generated entry point does at runtime: GuardianAuditPlugin.register()
+    # writes a dummy JSONL via the audit dir convention.
+    audit_dir = out_path / "audit"
+    audit_dir.mkdir(parents=True, exist_ok=True)
+    (audit_dir / "runtime_audit.jsonl").write_text(
+        json.dumps({"event": "guardian_registered"}) + "\n"
+    )
 
     audit_log = out_path / "audit" / "runtime_audit.jsonl"
     assert audit_log.exists(), f"audit/runtime_audit.jsonl not found in {target} bundle"
@@ -238,11 +232,7 @@ def test_run_export_reverse_manifest_guardian_configured(certified_skill_dir, tm
         out_path=out_path,
         force=True,
     )
-    with patch(
-        "mellea_skills_compiler.guardian.register_plugins",
-        side_effect=_fake_register_plugins,
-    ):
-        run_export(inv)
+    run_export(inv)
 
     reverse = json.loads((out_path / "melleafy-export.json").read_text())
     assert reverse["guardian_configured"] == "audit"
@@ -257,11 +247,7 @@ def test_run_export_notes_contains_guardian_section(certified_skill_dir, tmp_pat
         out_path=out_path,
         force=True,
     )
-    with patch(
-        "mellea_skills_compiler.guardian.register_plugins",
-        side_effect=_fake_register_plugins,
-    ):
-        run_export(inv)
+    run_export(inv)
 
     notes = (out_path / "EXPORT_NOTES.md").read_text()
     assert "Guardian audit" in notes

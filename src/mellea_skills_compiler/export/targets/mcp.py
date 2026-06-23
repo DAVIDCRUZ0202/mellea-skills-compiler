@@ -222,13 +222,13 @@ def _render_server_py(
     if has_policy_manifest:
         guardian_block = (
             "from pathlib import Path\n"
-            "from mellea_skills_compiler.guardian import register_plugins\n"
-            "from mellea_skills_compiler.certification.nexus_policy import PolicyManifest\n"
+            "from mellea_skills_compiler.models import PolicyManifest\n"
+            "from mellea_skills_compiler.plugins.guardian import GuardianAuditPlugin\n"
             "\n"
             '_manifest_path = Path(__file__).parent / "policy_manifest.json"\n'
             "if _manifest_path.exists():\n"
             "    _manifest = PolicyManifest.from_json(str(_manifest_path))\n"
-            '    register_plugins(_manifest, log_dir=Path(__file__).parent / "audit")\n'
+            "    GuardianAuditPlugin(_manifest).register()\n"
             "\n"
         )
 

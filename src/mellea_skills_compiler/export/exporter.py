@@ -550,10 +550,10 @@ def stage5_lint(result: EmitResult, loaded: LoadedContext, plan: TranslationPlan
         }
         entry_file = entry_files.get(target)
         if entry_file and entry_file.exists():
-            if "register_plugins" not in entry_file.read_text():
+            if "GuardianAuditPlugin" not in entry_file.read_text():
                 failures.append(
                     f"{entry_file.name}: policy_manifest.json present but "
-                    f"'register_plugins' not found in generated entry point"
+                    f"'GuardianAuditPlugin' not found in generated entry point"
                 )
 
     pkg_dir = result.out_path / plan.bundled_package_name
