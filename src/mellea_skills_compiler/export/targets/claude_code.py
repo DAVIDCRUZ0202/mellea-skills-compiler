@@ -457,7 +457,7 @@ def _render_readme(
     )
 
     install_cmd = (
-        "pip install -e .\npip install mellea-skills-compiler"
+        "pip install -e .\npip install git+https://github.com/generative-computing/mellea-skills-compiler.git"
         if has_policy_manifest else
         "pip install -e ."
     )

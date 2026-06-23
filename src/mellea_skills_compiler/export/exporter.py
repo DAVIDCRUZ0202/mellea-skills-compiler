@@ -401,12 +401,12 @@ def _build_export_notes(plan: TranslationPlan, loaded: LoadedContext) -> str:
     if plan.deployment_guidance:
         guidance = plan.deployment_guidance
         if loaded.policy_manifest_path is not None:
-            guidance = "Install `mellea-skills-compiler` before running: `pip install mellea-skills-compiler`. " + guidance
+            guidance = "Install `mellea-skills-compiler` before running: `pip install git+https://github.com/generative-computing/mellea-skills-compiler.git`. " + guidance
         lines += ["## Deployment guidance", "", guidance, ""]
     target = loaded.invocation.target
     guardian = loaded.policy_manifest_path is not None
     install_step = (
-        "Install dependencies: `pip install -e . && pip install mellea-skills-compiler`"
+        "Install dependencies: `pip install -e . && pip install git+https://github.com/generative-computing/mellea-skills-compiler.git`"
         if guardian else
         "Install dependencies: `pip install -e .`"
     )

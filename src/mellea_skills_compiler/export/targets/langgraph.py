@@ -630,7 +630,7 @@ def _render_readme(
         env_section = f"\n## Environment variables\n\nCreate `.env`:\n\n```\n{env_lines}\n```\n"
 
     install_cmd = (
-        "pip install -e .\npip install mellea-skills-compiler"
+        "pip install -e .\npip install git+https://github.com/generative-computing/mellea-skills-compiler.git"
         if has_policy_manifest else
         "pip install -e ."
     )
