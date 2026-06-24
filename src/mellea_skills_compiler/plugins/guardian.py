@@ -305,7 +305,7 @@ class GuardianPlugin(BasePlugin):
         native = [r for r in self.risks if r.is_native]
         custom = [r for r in self.risks if not r.is_native]
         LOGGER.info(
-            "Guardian plugin registered: %d risks — %d native, %d custom criteria",
+            "Guardian plugin registered [{self._PLUGIN_MODE}]: %d risks — %d native, %d custom criteria",
             len(self.risks),
             len(native),
             len(custom),
