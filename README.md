@@ -65,6 +65,8 @@ agent specification        spec → typed pipeline                   Guardian ho
 
 > **Backend Abstraction** — The compilation process uses a pluggable backend architecture. Currently, only the Claude Code backend is supported (via `--backend claude`), but the abstraction layer enables future support for alternative compilation backends such as IBM Bob or local LLMs.
 
+> **Backend Abstraction** — The compilation process uses a pluggable backend architecture. Currently, only the Claude Code backend is supported (via `--backend claude`), but the abstraction layer enables future support for alternative compilation backends such as IBM Bob or local LLMs.
+
 **Step 2: Certify** — A single `mellea-skills certify` invocation performs end-to-end governance: AI Atlas Nexus identifies applicable risks from Granite Guardian, NIST AI RMF, and Credo UCF taxonomies and emits a `PolicyManifest`; Guardian hooks configured from that manifest monitor every `m.instruct()` call as fixtures execute; each governance requirement is classified as AUTOMATED, PARTIAL, or MANUAL based on runtime evidence; a compliance report and audit trail are written alongside the compiled pipeline.
 
 ## Install
