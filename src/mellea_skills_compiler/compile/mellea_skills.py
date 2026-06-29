@@ -406,7 +406,7 @@ def compile(
 
     # Build claude system prompt
     system_prompt = build_system_prompt(
-        chosen_backend, chosen_model_id, defaults_source, mellea_package_name
+        chosen_backend, chosen_model_id, defaults_source, mellea_package_dir
     )
 
     # Start compilation process
