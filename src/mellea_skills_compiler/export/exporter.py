@@ -190,13 +190,17 @@ def stage2_load(inv: Invocation, manifest: dict) -> LoadedContext:
         python_package_dir = skill_root
         supporting_asset_dirs = []
 
-    # Policy manifest (optional)
+    # Policy manifest (optional) — check the skill dir itself first, then any
+    # audit_* sibling directories produced by the certify command.
     policy_manifest_path = None
-    audit_dirs = list(skill_root.parent.glob("audit_*"))
-    for audit_dir in reversed(audit_dirs):
-        if (audit_dir / "policy_manifest.json").exists():
-            policy_manifest_path = audit_dir / "policy_manifest.json"
-            break
+    if (skill_root / "policy_manifest.json").exists():
+        policy_manifest_path = skill_root / "policy_manifest.json"
+    else:
+        audit_dirs = list(skill_root.parent.glob("audit_*"))
+        for audit_dir in reversed(audit_dirs):
+            if (audit_dir / "policy_manifest.json").exists():
+                policy_manifest_path = audit_dir / "policy_manifest.json"
+                break
 
     return LoadedContext(
         invocation=inv,

@@ -185,7 +185,7 @@ class TestClaudeCodeGuardianInjection:
 # Integration tests — run_export() with a certified skill
 # ---------------------------------------------------------------------------
 
-_WEATHER_SKILL = Path(__file__).parents[3] / "skills/weather/weather_mellea"
+_WEATHER_SKILL = Path(__file__).parents[3] / "examples/weather/weather_mellea"
 _STUB_MANIFEST = {"use_case": "test", "taxonomy": "test", "risks": [], "additional_risks": []}
 
 

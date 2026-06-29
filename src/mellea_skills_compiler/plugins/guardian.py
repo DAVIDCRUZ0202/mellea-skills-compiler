@@ -30,7 +30,7 @@ from typing import Any, List, Optional
 from mellea.core.requirement import Requirement
 from mellea.plugins import HookType, Plugin, PluginMode, hook
 from mellea.plugins.registry import block
-from mellea.stdlib.components.genstub import SyncGenerativeStub
+from mellea.stdlib.components.genslot import SyncGenerativeSlot
 from mellea.stdlib.components.instruction import Instruction
 from rich.console import Console
 
@@ -226,7 +226,7 @@ def _run_guardian_pre_checks(
 
     # Get input text from the action component
     input_text = action.format_for_llm().args
-    if isinstance(action, SyncGenerativeStub):
+    if isinstance(action, SyncGenerativeSlot):
         input_text = str(input_text["arguments"])
     elif isinstance(action, Instruction):
         input_text_clean = {}
