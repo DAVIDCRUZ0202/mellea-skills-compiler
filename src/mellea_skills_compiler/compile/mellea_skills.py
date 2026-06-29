@@ -21,6 +21,7 @@ from mellea_skills_compiler.compile.backend import (
     get_backend,
     list_backends,
 )
+import mellea_skills_compiler.compile.backends  # noqa: F401 — triggers backend registration
 from mellea_skills_compiler.enums import (
     SpecFileFormat,
 )
