@@ -3,6 +3,7 @@
 *bobnotes/
 *notes/
 pending-notes.txt
+*IMPLEMENTATION_PLAN.md
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

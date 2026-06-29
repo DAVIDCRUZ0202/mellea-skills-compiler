@@ -118,9 +118,11 @@ def compile(
     """
     spec_path_obj = Path(spec_path)
     
-    # Validate backend parameter
+    # Validate backend parameter — import backends package first so that all
+    # backend implementations are registered before list_backends() is called.
+    import mellea_skills_compiler.compile.backends  # noqa: F401
     from mellea_skills_compiler.compile.backend import list_backends
-    
+
     available = list_backends()
     if backend not in available:
         LOGGER.error(

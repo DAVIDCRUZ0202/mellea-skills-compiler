@@ -218,7 +218,8 @@ class ClaudeCodeBackend:
             system_prompt = build_system_prompt(
                 context.skill_backend or "anthropic",
                 context.skill_model or model,
-                "default"
+                "default",
+                context.package_dir.name,
             )
 
             # Step 4: Write compile settings with deny rules
