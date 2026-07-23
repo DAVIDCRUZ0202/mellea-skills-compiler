@@ -271,6 +271,8 @@ def compile(
             )
         )
 
+LOGGER.info("Using compilation backend: %s", backend)
+
     # Derive mellea package name from the spec frontmatter
     mellea_package_name = _derive_mellea_package_name(spec_path, spec_frontmatter)
     mellea_package_dir = spec_dir / mellea_package_name
