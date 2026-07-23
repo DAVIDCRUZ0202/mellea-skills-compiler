@@ -346,6 +346,7 @@ def compile(
         repair_mode=repair_mode,
         skill_backend=chosen_backend,
         skill_model=chosen_model_id,
+        defaults_source-defaults_source,
         refresh_cache=refresh_cache,
     )
     LOGGER.info("Starting compilation with backend '%s'", backend)
