@@ -44,6 +44,7 @@ class CompilationContext:
         repair_mode: If True, use repair workflow instead of full compilation
         skill_backend: Runtime backend for the compiled skill (e.g., "claude", "bob")
         skill_model: Runtime model for the compiled skill
+        defaults_source: Source of where the backend values came from (e.g. "command-line", "file")
         refresh_cache: If True, force refresh of cached artifacts
     
     Example:
