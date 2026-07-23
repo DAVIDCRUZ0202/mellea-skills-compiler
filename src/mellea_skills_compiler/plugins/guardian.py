@@ -226,7 +226,7 @@ def _run_guardian_pre_checks(
 
     # Get input text from the action component
     input_text = action.format_for_llm().args
-    if isinstance(action, SyncGenerativeSlot):
+    if isinstance(action, SyncGenerativeStub):
         input_text = str(input_text["arguments"])
     elif isinstance(action, Instruction):
         input_text_clean = {}
