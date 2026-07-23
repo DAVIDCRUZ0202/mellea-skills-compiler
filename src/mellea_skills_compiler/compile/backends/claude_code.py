@@ -219,7 +219,7 @@ class ClaudeCodeBackend:
                 context.skill_backend or "anthropic",
                 context.skill_model or model,
                 "default",
-                context.package_dir.name,
+                context.package_dir,
             )
 
             # Step 4: Write compile settings with deny rules
