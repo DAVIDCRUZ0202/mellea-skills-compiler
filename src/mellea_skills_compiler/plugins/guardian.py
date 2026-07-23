@@ -30,7 +30,7 @@ from typing import Any, List, Optional
 from mellea.core.requirement import Requirement
 from mellea.plugins import HookType, Plugin, PluginMode, hook
 from mellea.plugins.registry import block
-from mellea.stdlib.components.genslot import SyncGenerativeSlot
+from mellea.stdlib.components.genstub import SyncGenerativeStub
 from mellea.stdlib.components.instruction import Instruction
 from rich.console import Console
 
