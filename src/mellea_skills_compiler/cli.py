@@ -120,7 +120,7 @@ def compile(
         from mellea_skills_compiler.compile import mellea_skills
 
         mellea_skills.compile(
-            spec_path_obj,
+            Path(spec_path),
             model,
             timeout,
             repair_mode=repair_mode,
