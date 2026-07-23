@@ -218,7 +218,7 @@ class ClaudeCodeBackend:
             system_prompt = build_system_prompt(
                 context.skill_backend or "anthropic",
                 context.skill_model or model,
-                "default",
+                context.defaults_source,
                 context.package_dir,
             )
 
