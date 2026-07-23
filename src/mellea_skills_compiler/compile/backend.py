@@ -64,6 +64,7 @@ class CompilationContext:
     repair_mode: bool = False
     skill_backend: Optional[str] = None
     skill_model: Optional[str] = None
+    defaults_source: Optional[str] = None
     refresh_cache: bool = False
 
 
