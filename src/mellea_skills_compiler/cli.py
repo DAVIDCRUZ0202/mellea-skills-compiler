@@ -116,20 +116,6 @@ def compile(
     against the LLM backend. A green compile means compiled + lints passed +
     smoke-check passed (or skipped because backend was unreachable).
     """
-    spec_path_obj = Path(spec_path)
-    
-    # Validate backend parameter — import backends package first so that all
-    # backend implementations are registered before list_backends() is called.
-    import mellea_skills_compiler.compile.backends  # noqa: F401
-    from mellea_skills_compiler.compile.backend import list_backends
-
-    available = list_backends()
-    if backend not in available:
-        LOGGER.error(
-            f"Unknown backend '{backend}'. Available backends: {', '.join(available)}"
-        )
-        raise typer.Exit(code=1)
-    
     try:
         from mellea_skills_compiler.compile import mellea_skills
 
