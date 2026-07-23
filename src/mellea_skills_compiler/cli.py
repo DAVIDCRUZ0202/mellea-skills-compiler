@@ -326,7 +326,7 @@ def certify(
         ),
     ] = None,
     inference_engine: Annotated[
-        str,
+        Literal["ollama"],
         typer.Option(
             "--inference-engine",
             "-i",
