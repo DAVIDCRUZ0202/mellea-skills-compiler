@@ -334,12 +334,6 @@ def compile(
             exc,
         )
 
-    # Get the backend implementation and validate its environment
-    backend_impl = get_backend(backend)
-    is_valid, error_msg = backend_impl.validate_environment()
-    if not is_valid:
-        raise RuntimeError(f"Backend '{backend}' not available: {error_msg}")
-    LOGGER.info("Backend '%s' environment validated successfully", backend)
 
     # Build compilation context and execute via backend
     context = CompilationContext(
